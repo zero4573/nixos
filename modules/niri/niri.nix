@@ -4,6 +4,8 @@
       enable = true;
       package = self.packages.${pkgs.stdenv.hostPlatform.system}.customNiri;
     };
+
+    systemd.user.services.niri.enableDefaultPath = false;
   };
 
   perSystem = { pkgs, lib, self', ... }: {

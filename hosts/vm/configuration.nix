@@ -1,13 +1,13 @@
 { self, inputs, ... }: {
   flake.nixosModules.vmConfiguration = { pkgs, lib, ... }: {
     imports = [
+      self.nixosModules.commonConfigs
       self.nixosModules.vmHardware
       self.nixosModules.niri
     ];
 
     services.xserver.videoDrivers = [ "virtio" ];
 
-    systemd.user.services.niri.enableDefaultPath = false;
     services.gnome.gnome-keyring.enable = true;
 
     # Bootloader.
@@ -17,21 +17,15 @@
 
     networking.hostName = "nixos"; # Define your hostname.
 
-    # Set your time zone.
-    time.timeZone = "America/Toronto";
-
-    # Select internationalisation properties.
-    i18n.defaultLocale = "en_CA.UTF-8";
-
-    services.greetd = {
-      enable = true;
-      settings = {
-        default_session = {
-          command = "niri-session";
-          user = "ato";
-        };
-      };
-    };
+    security.sudo.extraRules = [{
+      users = [ "ato" ];
+      commands = [
+        {
+          command = "ALL";
+          options = [ "NOPASSWD" ];
+        }
+      ];
+    }];
 
     services.pulseaudio.enable = false;
     security.rtkit.enable = true;
@@ -56,14 +50,6 @@
       #packages = with pkgs; [];
     };
     nixpkgs.config.allowUnfree = true;
-
-
-    nix.settings.experimental-features = [ "nix-command" "flakes" ];
-
-    environment.systemPackages = with pkgs; [
-      vim
-      git
-    ];
 
     # Mount shared directory from host system
     virtualisation.libvirtd.enable = true;
