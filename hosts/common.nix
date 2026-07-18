@@ -13,13 +13,21 @@ _: {
     environment.systemPackages = with pkgs; [
       vim
       git
+      btop
+      lazygit
     ];
 
     programs.vim = {
       enable = true;
       defaultEditor = true;
-      # vimAlias = true;
-      # viAlias = true;
+    };
+
+    programs.git = {
+      enable = true;
+      config = {
+        pull.rebase = true;
+        push.autoSetupRemote = true;
+      };
     };
   };
 }

@@ -4,6 +4,7 @@
       self.nixosModules.commonConfigs
       self.nixosModules.vmHardware
       self.nixosModules.niri
+      self.nixosModules.thunar
     ];
 
     services.xserver.videoDrivers = [ "virtio" ];
