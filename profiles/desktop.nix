@@ -7,6 +7,7 @@
     imports = [
       self.nixosModules.commonConfigs
       self.nixosModules.audio
+      self.nixosModules.graphics
       self.nixosModules.fonts
       self.nixosModules.portals
       self.nixosModules.networking
