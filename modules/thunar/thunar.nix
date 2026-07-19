@@ -3,4 +3,36 @@
     programs.thunar.enable = true;
     programs.xfconf.enable = true;
   };
+
+  # Thunar is a GTK3 app with no session theme daemon under niri, so its
+  # look is set via home-manager's gtk module: adw-gtk3 (dark) gives it the
+  # modern libadwaita look, Papirus-Dark for icons, matching the system-wide
+  # Bibata cursor (already installed, see modules/niri/niri.nix).
+  flake.homeModules.thunar = { pkgs, ... }: {
+    gtk = {
+      enable = true;
+
+      theme = {
+        name = "adw-gtk3-dark";
+        package = pkgs.adw-gtk3;
+      };
+
+      iconTheme = {
+        name = "Papirus-Dark";
+        package = pkgs.papirus-icon-theme;
+      };
+
+      cursorTheme = {
+        name = "Bibata-Modern-Classic";
+        package = pkgs.bibata-cursors;
+      };
+
+      gtk3.extraConfig.gtk-application-prefer-dark-theme = true;
+      gtk4.extraConfig.gtk-application-prefer-dark-theme = true;
+    };
+
+    # Require a double-click to open files/enter folders (Thunar's own
+    # default is already double-click; this pins it declaratively).
+    xfconf.settings.thunar."misc-single-click" = false;
+  };
 }

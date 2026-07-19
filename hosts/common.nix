@@ -1,20 +1,41 @@
-_: {
-  flake.nixosModules.commonConfigs = { pkgs, ... }: {
-    system.stateVersion = "26.11";
+{ self, ... }: {
+  flake.nixosModules.commonConfigs = { pkgs, config, lib, ... }:
+  let
+    cfg = config.hostConfig;
+  in {
+    imports = [
+      self.nixosModules.hostOptions
+      self.nixosModules.users
+    ];
+
+    networking.hostName = cfg.hostName;
+
+    system.stateVersion = cfg.stateVersion;
 
     # Set your time zone.
-    time.timeZone = "America/Toronto";
+    time.timeZone = cfg.timezone;
 
     # Select internationalisation properties.
-    i18n.defaultLocale = "en_CA.UTF-8";
+    i18n.defaultLocale = cfg.defaultLocale;
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
+    # Keep the store bounded.
+    nix.settings.auto-optimise-store = true;
+    nix.gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 30d";
+    };
+
+    nixpkgs.config.allowUnfree = true;
 
     environment.systemPackages = with pkgs; [
       vim
       git
       btop
       lazygit
+      yt-dlp
     ];
 
     programs.vim = {
@@ -27,6 +48,11 @@ _: {
       config = {
         pull.rebase = true;
         push.autoSetupRemote = true;
+      } // lib.optionalAttrs (cfg.git.userName != "" && cfg.git.userEmail != "") {
+        user = {
+          name = cfg.git.userName;
+          email = cfg.git.userEmail;
+        };
       };
     };
   };
