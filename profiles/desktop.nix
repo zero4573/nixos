@@ -21,6 +21,7 @@
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.screenshot
+      self.nixosModules.zsh
 
       # Flatpak mechanism (enable + flathub remote) + user dotfiles
       self.nixosModules.flatpakBase

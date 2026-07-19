@@ -31,17 +31,17 @@
     nixpkgs.config.allowUnfree = true;
 
     environment.systemPackages = with pkgs; [
-      vim
       git
       btop
       lazygit
       yt-dlp
     ];
 
-    programs.vim = {
+    programs.neovim = {
       enable = true;
       defaultEditor = true;
     };
+
 
     programs.git = {
       enable = true;
