@@ -8,6 +8,7 @@ _: {
       isNormalUser = true;
       description = if user.description != "" then user.description else user.name;
       extraGroups = user.extraGroups;
+      initialPassword = user.initialPassword;
     };
   };
 }

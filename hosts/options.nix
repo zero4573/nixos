@@ -43,6 +43,16 @@
           default = [ "networkmanager" "wheel" ];
           description = "Extra groups for the primary user.";
         };
+
+        # NixOS's own docs note this is world-readable in the Nix store, so
+        # it's only for bootstrapping a fresh install -- change it via
+        # `passwd` right after first login (mutableUsers, NixOS's default,
+        # means later passwd changes aren't clobbered by rebuilds).
+        initialPassword = lib.mkOption {
+          type = lib.types.str;
+          default = "password";
+          description = "Initial (world-readable, change-immediately) password for the primary user.";
+        };
       };
 
       hostName = lib.mkOption {

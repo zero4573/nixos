@@ -77,11 +77,15 @@ other host, using `.#vm`.
    ```sh
    sudo nixos-install --flake .#<host> --root /mnt
    ```
-   No root or user password is set declaratively anywhere in this repo, so
-   `nixos-install` will prompt you to set the root password interactively. After first
-   boot, log in as root and run `passwd <your-username>` to set a password for the
-   primary user (its account is created by `hostConfig.user`, but with no password until
-   you set one).
+   `nixos-install` will still prompt you to set a root password interactively (no root
+   password is set declaratively anywhere in this repo). The primary user, however, does get
+   a declarative `hostConfig.user.initialPassword` (see `hosts/options.nix`) — log in as that
+   user with it after first boot and run `passwd` **immediately** to change it, since it's
+   world-readable in the Nix store.
+
+   Note: you generally can't log in as `root` through the graphical greeter (SDDM hides/blocks
+   it by default) — if you ever need to, switch to a virtual console via `Ctrl+Alt+F2`, log in
+   with root and the password you set above, and run `passwd <username>` from there instead.
 
 6. **Reboot, remove the install media.** You'll be prompted for the LUKS passphrase (set in
    step 4) before `/` can unlock and boot continues.
