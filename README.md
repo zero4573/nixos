@@ -90,7 +90,7 @@ other host, using `.#vm`.
 6. **Reboot, remove the install media.** You'll be prompted for the LUKS passphrase (set in
    step 4) before `/` can unlock and boot continues.
 
-7. **Ongoing rebuilds** go through `./nixos-config.sh <host>` (a thin wrapper around
+7. **Ongoing rebuilds** go through `./nixos-rebuild.sh <host>` (a thin wrapper around
    `nixos-rebuild switch --flake path:.#<host>`) from then on — see below.
 
 ## Building / testing without touching real hardware

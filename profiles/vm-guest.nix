@@ -30,8 +30,8 @@
       ];
     }];
 
-    # Host <-> guest tooling and shared directory.
-    virtualisation.libvirtd.enable = true;
+    # Host <-> guest tooling and shared directory. libvirtd itself is already
+    # enabled via modules/apps/dev.nix (workProfile).
     virtualisation.libvirtd.qemu.vhostUserPackages = [ pkgs.virtiofsd ];
     services.qemuGuest.enable = true;
 

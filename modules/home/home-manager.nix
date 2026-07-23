@@ -20,6 +20,7 @@
           self.homeModules.screenshot
           self.homeModules.mpd
           self.homeModules.zsh
+          self.homeModules.nodatacow
         ];
       };
     };
