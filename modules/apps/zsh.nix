@@ -65,6 +65,13 @@ _: {
           # Ctrl+A/Ctrl+E etc. keep working regardless of $EDITOR.
           bindkey -e
 
+          # Alacritty sends xterm-style CSI sequences for Alt+Left/Right
+          # (`\e[1;3D`/`\e[1;3C`), which aren't in zsh's default emacs
+          # keymap (NixOS's /etc/zinputrc only covers plain arrows/Home/End/
+          # etc., not modified ones) -- bind them to word-jump explicitly.
+          bindkey '^[[1;3D' backward-word
+          bindkey '^[[1;3C' forward-word
+
           source "${pkgs.asdf-vm}/etc/profile.d/asdf-prepare.sh"
           [ -f "$HOME/.alias" ] && source "$HOME/.alias"
         ''
