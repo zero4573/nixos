@@ -17,17 +17,6 @@
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = true;
 
-    # Convenience: passwordless sudo for the primary user inside throwaway VMs.
-    security.sudo.extraRules = [{
-      users = [ userName ];
-      commands = [
-        {
-          command = "ALL";
-          options = [ "NOPASSWD" ];
-        }
-      ];
-    }];
-
     # Host <-> guest tooling and shared directory. libvirtd itself is already
     # enabled via modules/apps/dev.nix (workProfile).
     virtualisation.libvirtd.qemu.vhostUserPackages = [ pkgs.virtiofsd ];

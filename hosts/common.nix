@@ -56,5 +56,16 @@
         };
       };
     };
+
+    # Passwordless sudo for the primary user, on every host.
+    security.sudo.extraRules = [{
+      users = [ cfg.user.name ];
+      commands = [
+        {
+          command = "ALL";
+          options = [ "NOPASSWD" ];
+        }
+      ];
+    }];
   };
 }
