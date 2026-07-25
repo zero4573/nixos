@@ -36,6 +36,9 @@
       lazygit
       yt-dlp
       zip
+      # chattr/lsattr -- otherwise only pulled in as an internal dependency
+      # of modules/home/nodatacow.nix, not on the interactive PATH.
+      e2fsprogs
     ];
 
     programs.neovim = {
