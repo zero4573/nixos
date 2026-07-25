@@ -11,7 +11,10 @@
       useGlobalPkgs = true;
       useUserPackages = true;
       backupFileExtension = "hm-bak";
-      extraSpecialArgs = { inherit self inputs; };
+      extraSpecialArgs = {
+        inherit self inputs;
+        asdfPlugins = config.programs.asdf.plugins;
+      };
       users.${user} = {
         imports = [
           self.homeModules.desktopHome

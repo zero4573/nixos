@@ -40,5 +40,15 @@
       "org.remmina.Remmina"
       "com.sublimemerge.App"
     ];
+
+    # Base asdf plugins present on every desktop host. Host profiles append
+    # more to programs.asdf.plugins (it merges); see modules/apps/zsh.nix for
+    # where these actually get installed.
+    programs.asdf.plugins = [
+      "golang"
+      "java"
+      "python"
+      "nodejs"
+    ];
   };
 }

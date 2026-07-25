@@ -35,6 +35,7 @@
       btop
       lazygit
       yt-dlp
+      zip
     ];
 
     programs.neovim = {

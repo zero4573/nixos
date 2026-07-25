@@ -27,6 +27,17 @@
       description = "Extra niri keybinds merged into the generated config.";
     };
 
+    # Same extension-point pattern as programs.niri.extraBinds above: profiles
+    # append to this list (desktopProfile sets the shared base, workProfile
+    # adds more), and modules/apps/zsh.nix's home-manager module (which
+    # receives it via extraSpecialArgs, see modules/home/home-manager.nix)
+    # installs each as an asdf plugin on activation.
+    options.programs.asdf.plugins = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "asdf plugin names to install for the primary user.";
+    };
+
     options.hostConfig = {
       user = {
         name = lib.mkOption {

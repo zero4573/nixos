@@ -25,6 +25,13 @@
       "us.zoom.Zoom"
     ];
 
+    # Work-only asdf plugins, appended to the base list (profiles/desktop.nix;
+    # programs.asdf.plugins merges).
+    programs.asdf.plugins = [
+      "terraform"
+      "packer"
+    ];
+
     systemd.user.services.teams-pwa = {
       description = "Microsoft Teams (PWA)";
       wantedBy = [ "graphical-session.target" ];
