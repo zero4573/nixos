@@ -60,6 +60,15 @@
       };
     };
 
+    # Kill cgroups under memory pressure instead of letting the whole system
+    # freeze (e.g. IntelliJ + Docker + browser all running at once) --
+    # trade-off: a runaway process (mid-indexing, say) can get killed
+    # abruptly with no prompt. `enable` already defaults to true.
+    systemd.oomd = {
+      enableRootSlice = true;
+      enableUserSlices = true;
+    };
+
     # Passwordless sudo for the primary user, on every host.
     security.sudo.extraRules = [{
       users = [ cfg.user.name ];
