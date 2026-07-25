@@ -6,6 +6,10 @@ _: {
     services.mpd = {
       enable = true;
       musicDirectory = "${config.home.homeDirectory}/Music";
+      # Rescan on changes (inotify) instead of only at mpd startup -- without
+      # this, the library silently stays empty/stale if ~/Music didn't exist
+      # yet the first time mpd started (as happened before it was populated).
+      extraConfig = "auto_update yes";
     };
 
     services.mpd-mpris.enable = true;
