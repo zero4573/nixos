@@ -50,5 +50,27 @@
       "automount-drives/enabled" = true;
       "automount-media/enabled" = true;
     };
+
+    # Thunar's "Open Terminal Here" shells out to `exo-open --launch
+    # TerminalEmulator`, and this exo version has its Terminal Emulator
+    # lookup hardcoded to the desktop id "xfce4-terminal.desktop" -- no
+    # $TERMINAL check, no generic search. xfce4-terminal itself isn't
+    # installed (alacritty is the only terminal on this system), so that
+    # lookup fails with "Could not find fallback Terminal Emulator
+    # Application". This shim satisfies the lookup by name while actually
+    # launching alacritty; NoDisplay keeps it out of app launchers (vicinae
+    # etc.) since it's not a real second terminal, just plumbing for exo.
+    xdg.dataFile."applications/xfce4-terminal.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Alacritty
+      Comment=Terminal Emulator
+      Exec=alacritty
+      Icon=Alacritty
+      Terminal=false
+      Categories=System;TerminalEmulator;
+      StartupNotify=true
+      NoDisplay=true
+    '';
   };
 }
