@@ -11,6 +11,13 @@ _: {
     environment.systemPackages = with pkgs; [
       dbeaver-bin
       jetbrains-toolbox
+      # Native package, not Flatpak: Zed's Flatpak build re-execs its real
+      # binary on the host via `flatpak-spawn --host` (it only uses the
+      # sandbox as a distribution mechanism), which fails on NixOS since the
+      # host has no FHS `/lib64/ld-linux-x86-64.so.2` -- only nixpkgs'
+      # friendly stub-ld placeholder that explains why it can't run generic
+      # dynamically-linked binaries.
+      zed-editor
     ];
   };
 }

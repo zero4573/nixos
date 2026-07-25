@@ -38,7 +38,7 @@
       "com.calibre_ebook.calibre"
       "com.rtosta.zapzap"
       "org.remmina.Remmina"
-      "dev.zed.Zed"
+      "com.sublimemerge.App"
     ];
   };
 }

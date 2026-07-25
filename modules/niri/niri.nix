@@ -40,6 +40,25 @@ let
     hotkey-overlay.skip-at-startup = _: { };
 
     input.keyboard.xkb.layout = "us";
+
+    # Disable the mouse hot corner that toggles the overview (niri's default
+    # is the top-left corner; whichever corner it's felt at, this turns it
+    # off entirely). Overview is still reachable via its own bind below.
+    gestures.hot-corners.off = _: { };
+
+    # Tap-to-click, with clicks determined by finger count rather than
+    # where on the pad you press (avoids accidental right-clicks from a
+    # push near a corner/edge).
+    input.touchpad = {
+      tap = _: { };
+      click-method = "clickfinger";
+    };
+
+    # Framework 13 2.8K panel (2880x1920) -- niri auto-picks scale 2 for a
+    # panel this dense, but that halves usable real estate (effectively a
+    # 1440x960 canvas). Run unscaled instead, at the panel's native pixel
+    # resolution.
+    outputs."eDP-1".scale = 1.0;
     layout.gaps = 5;
     layout.focus-ring = {
       width = 2;

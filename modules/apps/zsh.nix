@@ -41,6 +41,12 @@ _: {
           source "${pkgs.zsh-powerlevel10k}/share/zsh-powerlevel10k/powerlevel10k.zsh-theme"
         '')
         ''
+          # zsh auto-selects vi keybindings whenever $EDITOR/$VISUAL contains
+          # the substring "vi" -- which "nvim" does (programs.neovim.defaultEditor
+          # sets EDITOR=nvim in hosts/common.nix). Force emacs bindings so
+          # Ctrl+A/Ctrl+E etc. keep working regardless of $EDITOR.
+          bindkey -e
+
           source "${pkgs.asdf-vm}/etc/profile.d/asdf-prepare.sh"
           [ -f "$HOME/.alias" ] && source "$HOME/.alias"
         ''
