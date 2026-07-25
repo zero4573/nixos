@@ -100,6 +100,43 @@
           default = "";
           description = "Default git user.email.";
         };
+
+        # Per-remote identity/signing overrides, applied via git conditional
+        # includes -- see modules/apps/git.nix, which just renders whatever
+        # list a host provides here (it has no built-in notion of
+        # "personal"/"work" or which forge is which). An entry with only
+        # `condition` set (no userName/userEmail/signingKey) is dropped
+        # entirely rather than emitting an empty override.
+        identities = lib.mkOption {
+          type = lib.types.listOf (lib.types.submodule {
+            options = {
+              condition = lib.mkOption {
+                type = lib.types.str;
+                description = ''
+                  git includeIf condition (see git-config(1)), e.g.
+                  "hasconfig:remote.*.url:*github.com*".
+                '';
+              };
+              userName = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "git user.name for repos matching condition.";
+              };
+              userEmail = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "git user.email for repos matching condition.";
+              };
+              signingKey = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "SSH public key (or key path) for commits matching condition.";
+              };
+            };
+          });
+          default = [ ];
+          description = "Per-remote git identity/signing overrides.";
+        };
       };
 
       profile = lib.mkOption {

@@ -24,6 +24,7 @@
           self.homeModules.mpd
           self.homeModules.zsh
           self.homeModules.nodatacow
+          self.homeModules.git
         ];
       };
     };
