@@ -72,5 +72,28 @@
       StartupNotify=true
       NoDisplay=true
     '';
+
+    # thunar-volman only reacts to udisks2 hotplug signals while a live
+    # Thunar process is already subscribed (via GVolumeMonitor) -- and niri
+    # has no GNOME/XFCE session component keeping one alive in the
+    # background. Autostart Thunar in daemon mode (no window) so hotplug
+    # automount works even when no Thunar window is open.
+    systemd.user.services.thunar-daemon = {
+      Unit = {
+        Description = "Thunar (background daemon, so thunar-volman reacts to hotplug even with no window open)";
+        After = [ "graphical-session.target" ];
+        PartOf = [ "graphical-session.target" ];
+      };
+      Service = {
+        # Bare command name, not `lib.getExe pkgs.thunar` -- must resolve via
+        # PATH to the system-installed thunar (wrapped with thunarPlugins,
+        # i.e. with thunar-volman baked in, via programs.thunar.plugins in
+        # this file's NixOS module) rather than a plain, plugin-less
+        # pkgs.thunar build.
+        ExecStart = "thunar --daemon";
+        Restart = "on-failure";
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
   };
 }
