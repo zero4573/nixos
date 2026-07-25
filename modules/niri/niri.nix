@@ -341,6 +341,15 @@ in {
         kdePackages.qtmultimedia
       ];
     };
+
+    # Unlock the login keyring automatically at login. services.gnome.gnome-keyring
+    # wires pam_gnome_keyring into the "login" PAM service; SDDM's own PAM
+    # service (auth/account/password/session) just substacks "login" (see
+    # nixpkgs' sddm module), so this covers SDDM logins too. It does *not*
+    # cover the separate "passwd" PAM service, though, so `passwd` still needs
+    # its own line to keep the keyring's password in sync when changed.
+    services.gnome.gnome-keyring.enable = true;
+    security.pam.services.passwd.enableGnomeKeyring = true;
   };
 
   perSystem = { pkgs, lib, system, ... }: {

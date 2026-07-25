@@ -11,8 +11,6 @@
 
     services.xserver.videoDrivers = [ "virtio" ];
 
-    services.gnome.gnome-keyring.enable = true;
-
     # Bootloader: EFI + systemd-boot, same as the framework hosts (works with
     # disko's ESP partition; also lets NixOS's vm-variant tooling pick OVMF
     # firmware automatically).
