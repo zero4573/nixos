@@ -25,6 +25,14 @@ _: {
     # Compressed swap for laptops.
     zramSwap.enable = true;
 
+    # Battery status/percentage over D-Bus (org.freedesktop.UPower) -- reads
+    # /sys/class/power_supply itself, but nothing exposes it to user-session
+    # apps without this running. Noctalia's battery widget (and bar widget
+    # in general) is built entirely on Quickshell's UPower service binding,
+    # so without this it silently detects no battery at all and hides the
+    # widget (hideIfNotDetected in modules/noctalia/noctalia.json).
+    services.upower.enable = true;
+
     # Basic firewall (tailscale manages its own interface rules).
     networking.firewall.enable = true;
   };
