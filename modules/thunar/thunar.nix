@@ -39,6 +39,19 @@
       gtk4.extraConfig.gtk-application-prefer-dark-theme = true;
     };
 
+    # home-manager's gtk module above only writes GTK's own settings.ini
+    # files -- it doesn't touch dconf. This is the separate freedesktop
+    # signal (org.freedesktop.appearance color-scheme, served over the
+    # xdg-desktop-portal-gtk backend already enabled in
+    # modules/desktop/portals.nix) that libadwaita/GTK4 apps, Flatpak apps
+    # going through the portal, and some Electron apps check to decide
+    # dark vs light, independent of the settings.ini flag above.
+    dconf.settings."org/gnome/desktop/interface" = {
+      color-scheme = "prefer-dark";
+      gtk-theme = "adw-gtk3-dark";
+      icon-theme = "Papirus-Dark";
+    };
+
     # Require a double-click to open files/enter folders (Thunar's own
     # default is already double-click; this pins it declaratively).
     xfconf.settings.thunar."misc-single-click" = false;

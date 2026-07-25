@@ -25,6 +25,7 @@
           self.homeModules.zsh
           self.homeModules.nodatacow
           self.homeModules.git
+          self.homeModules.zed
         ];
       };
     };
