@@ -18,6 +18,9 @@ _: {
       # friendly stub-ld placeholder that explains why it can't run generic
       # dynamically-linked binaries.
       zed-editor
+      # Local-first, git-friendly API client (collections are plain files,
+      # unlike Postman's cloud-account model).
+      bruno
     ];
   };
 }
