@@ -9,7 +9,15 @@ _: {
       # Rescan on changes (inotify) instead of only at mpd startup -- without
       # this, the library silently stays empty/stale if ~/Music didn't exist
       # yet the first time mpd started (as happened before it was populated).
-      extraConfig = "auto_update yes";
+      extraConfig = ''
+        auto_update "yes"
+
+        audio_output {
+          type      "pulse"
+          name      "PipeWire"
+          mixer_type "software"
+        }
+      '';
     };
 
     services.mpd-mpris.enable = true;
