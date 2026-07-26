@@ -1,5 +1,14 @@
 { self, inputs, ... }:
 let
+  # Named niri workspaces, in display/index order. A plain `workspaces`
+  # attrset can't preserve declaration order -- Nix always iterates attrsets
+  # alphabetically -- so ordered workspace blocks have to go through the
+  # wrapper's`extraSettings` escape hatch (a real list) instead.
+  niriWorkspaceOrder = [ "teams" "browser" ];
+  niriExtraSettings = map
+    (name: { workspace = _: { content = { }; props = name; }; })
+    niriWorkspaceOrder;
+
   # Builds the niri `settings` attrset. `extraBinds` lets other modules
   # contribute additional keybinds without this file needing to know about them
   # see programs.niri.extraBinds in hosts/options.nix.
@@ -21,18 +30,13 @@ let
   in {
     spawn-at-startup = [
       [ (lib.getExe pkgs.jetbrains-toolbox) "--minimize" ]
-      (lib.getExe pkgs.brave)
+      [ (lib.getExe pkgs.brave) "--restore-last-session" ]
       [ (lib.getExe pkgs.flatpak) "run" "com.discordapp.Discord" "--start-minimized" ]
     ];
 
     spawn-sh-at-startup = [
       ''${lib.getExe pkgs.flatpak} run com.rtosta.zapzap --setSettings system/start_background true && ${lib.getExe pkgs.flatpak} run com.rtosta.zapzap''
     ];
-
-    workspaces = {
-      "teams" = { };
-      "browser" = { };
-    };
 
     # For legacy X11 applications
     xwayland-satellite.path = lib.getExe pkgs.xwayland-satellite;
@@ -78,10 +82,12 @@ let
       {
         matches = [ { app-id = "teams.microsoft.com"; at-startup = true; } ];
         open-on-workspace = "teams";
+        open-maximized = true;
       }
       {
         matches = [ { app-id = "^brave-browser$"; at-startup = true; } ];
         open-on-workspace = "browser";
+        open-maximized = true;
       }
     ];
 
@@ -201,46 +207,8 @@ let
       "Super+Comma"."consume-window-into-column" = { };
       "Super+Period"."expel-window-from-column" = { };
 
-      "Super+R"."switch-preset-column-width" = { };
-      "Super+Shift+R"."switch-preset-column-width-back" = { };
-
-      "Super+Ctrl+Shift+R"."switch-preset-window-height" = { };
-      "Super+Ctrl+R"."reset-window-height" = { };
-
-      # -- Workspace switching --
-      "Super+WheelScrollDown" = _: {
-        props.cooldown-ms = 150;
-        content.focus-workspace-down = { };
-      };
-      "Super+WheelScrollUp" = _: {
-        props.cooldown-ms = 150;
-        content.focus-workspace-up = { };
-      };
-      "Super+Ctrl+WheelScrollDown" = _: {
-        props.cooldown-ms = 150;
-        content.move-column-to-workspace-down = { };
-      };
-      "Super+Ctrl+WheelScrollUp" = _: {
-        props.cooldown-ms = 150;
-        content.move-column-to-workspace-up = { };
-      };
-
-      "Super+WheelScrollRight"."focus-column-right" = { };
-      "Super+WheelScrollLeft"."focus-column-left" = { };
-      "Super+Ctrl+WheelScrollRight"."move-column-right" = { };
-      "Super+Ctrl+WheelScrollLeft"."move-column-left" = { };
-
-      "Super+Shift+WheelScrollDown"."focus-column-right" = { };
-      "Super+Shift+WheelScrollUp"."focus-column-left" = { };
-      "Super+Ctrl+Shift+WheelScrollDown"."move-column-right" = { };
-      "Super+Ctrl+Shift+WheelScrollUp"."move-column-left" = { };
-
-      "Super+Tab"."focus-workspace-previous" = { };
-
       # -- Layout controls --
       "Super+Ctrl+F"."expand-column-to-available-width" = { };
-      "Super+C"."center-column" = { };
-      "Super+Ctrl+C"."center-visible-columns" = { };
       "Super+Minus".set-column-width = "-10%";
       "Super+Equal".set-column-width = "+10%";
       "Super+Shift+Minus".set-window-height = "-10%";
@@ -250,20 +218,14 @@ let
       "Super+T"."toggle-window-floating" = { };
       "Super+F"."maximize-column" = { };
       "Super+Shift+F"."fullscreen-window" = { };
-      "Super+W"."toggle-column-tabbed-display" = { };
-      "Super+M"."maximize-window-to-edges" = { };
 
       # -- Screenshots
       "Ctrl+Shift+1" = _: {
         props.hotkey-overlay-title = "Screenshot (select area): flameshot";
         content.spawn-sh = "mkdir -p ~/Pictures/Screenshots && ${lib.getExe pkgs.flameshot} gui -p ~/Pictures/Screenshots -c";
       };
-      "Ctrl+Shift+2" = _: {
-        props.hotkey-overlay-title = "Screenshot (screen): flameshot";
-        content.spawn-sh = "mkdir -p ~/Pictures/Screenshots && ${lib.getExe pkgs.flameshot} screen -p ~/Pictures/Screenshots -c";
-      };
-      "Ctrl+Shift+3" = _: {
-        props.hotkey-overlay-title = "Screenshot (window): flameshot";
+      "Print" = _: {
+        props.hotkey-overlay-title = "Screenshot (select area): flameshot";
         content.spawn-sh = "mkdir -p ~/Pictures/Screenshots && ${lib.getExe pkgs.flameshot} gui -p ~/Pictures/Screenshots -c";
       };
 
@@ -275,7 +237,6 @@ let
       };
 
       # -- Exit / power --
-      "Ctrl+Alt+Delete"."quit" = { };
       "Super+Shift+P"."power-off-monitors" = { };
       "Super+O" = _: {
         props.repeat = false;
@@ -307,6 +268,7 @@ in {
           system = pkgs.stdenv.hostPlatform.system;
           extraBinds = config.programs.niri.extraBinds;
         };
+        extraSettings = niriExtraSettings;
       };
     };
 
@@ -344,6 +306,7 @@ in {
     packages.customNiri = inputs.wrapper-modules.wrappers.niri.wrap {
       inherit pkgs;
       settings = mkNiriSettings { inherit pkgs lib system; };
+      extraSettings = niriExtraSettings;
     };
   };
 }
