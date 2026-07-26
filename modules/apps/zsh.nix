@@ -60,6 +60,10 @@ _: {
     programs.zsh = {
       enable = true;
       enableCompletion = true;
+      autosuggestion = {
+        enable = true;
+        strategy = [ "history" "completion" ];
+      };
       initContent = lib.mkMerge [
         # Load the theme as early as possible, before anything else prints --
         # required for powerlevel10k's instant-prompt feature to work.
