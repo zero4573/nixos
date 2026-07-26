@@ -26,6 +26,7 @@
           self.homeModules.nodatacow
           self.homeModules.git
           self.homeModules.zed
+          self.homeModules.claudeSandbox
         ];
       };
     };
