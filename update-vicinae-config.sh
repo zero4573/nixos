@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# Pulls the live Vicinae snippets file back into the nix-tracked copy so
-# snippets added via the GUI can be committed and carried to other hosts.
+# Pulls live Vicinae config (settings.json, snippets.json) back into the
+# nix-tracked copies so changes made via the GUI can be committed and
+# carried to other hosts.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-live_file="$HOME/.local/share/vicinae/snippets/snippets.json"
-tracked_file="$repo_dir/modules/vicinae/snippets.json"
+config_dir="$HOME/.config/vicinae"
+data_dir="$HOME/.local/share/vicinae"
+tracked_dir="$repo_dir/modules/vicinae"
 
-if [ ! -f "$live_file" ]; then
-  echo "No live snippets file found at $live_file" >&2
-  exit 1
+# settings.json is JS-with-comments, not strict JSON -- copy verbatim rather
+# than reformatting through jq (which would choke on the comments anyway).
+if [ -f "$config_dir/settings.json" ]; then
+  cp "$config_dir/settings.json" "$tracked_dir/settings.json"
+  echo "Updated $tracked_dir/settings.json"
+else
+  echo "No live settings.json found at $config_dir/settings.json" >&2
 fi
 
-nix run nixpkgs#jq -- . "$live_file" > "$tracked_file"
+if [ -f "$data_dir/snippets/snippets.json" ]; then
+  jq . "$data_dir/snippets/snippets.json" > "$tracked_dir/snippets.json"
+  echo "Updated $tracked_dir/snippets.json"
+else
+  echo "No live snippets.json found at $data_dir/snippets/snippets.json" >&2
+fi
 
-echo "Updated $tracked_file from $live_file."
+echo ""
 echo "Review and commit:"
-echo "  git -C \"$repo_dir\" diff -- modules/vicinae/snippets.json"
+echo "  git -C \"$repo_dir\" diff -- modules/vicinae/"

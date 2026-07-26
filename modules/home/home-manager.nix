@@ -19,7 +19,7 @@
         imports = [
           self.homeModules.desktopHome
           self.homeModules.noctalia
-          self.homeModules.vicinaeSnippets
+          self.homeModules.vicinaeConfig
           self.homeModules.thunar
           self.homeModules.screenshot
           self.homeModules.mpd
