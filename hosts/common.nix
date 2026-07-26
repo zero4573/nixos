@@ -41,6 +41,10 @@
 
     nixpkgs.config.allowUnfree = true;
 
+    # Lets prebuilt, dynamically-linked generic-Linux binaries run as-is (go)
+    # NixOS has no FHS paths for the loader/libs they expect, so this provides one.
+    programs.nix-ld.enable = true;
+
     environment.systemPackages = with pkgs; [
       git
       btop
@@ -48,6 +52,7 @@
       yt-dlp
       zip
       jq
+      gnumake
 
       # chattr/lsattr -- otherwise only pulled in as an internal dependency
       # of modules/home/nodatacow.nix, not on the interactive PATH.

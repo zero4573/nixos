@@ -71,10 +71,16 @@ let
         };
       }
 
+      # at-startup=true scopes this to the silent spawn-at-startup launch
+      # (see spawn-at-startup/spawn-sh-at-startup above) -- without it, this
+      # rule re-applies every time the window gets recreated (e.g. restoring
+      # from the tray after being hidden, which under Wayland tends to
+      # destroy and remap a fresh toplevel rather than truly show/hide one),
+      # permanently preventing these windows from ever gaining focus again.
       {
         matches = [
-          { app-id = "^discord$"; }
-          { app-id = "^com\\.rtosta\\.zapzap$"; }
+          { app-id = "^discord$"; at-startup = true; }
+          { app-id = "^com\\.rtosta\\.zapzap$"; at-startup = true; }
         ];
         open-focused = false;
       }

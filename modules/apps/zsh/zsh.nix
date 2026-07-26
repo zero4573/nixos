@@ -40,6 +40,7 @@ _: {
       alias vim='nvim'
       alias vi='nvim'
       alias p='cd ~/Projects'
+      alias cd='z'
     '';
 
     home.file.".p10k.zsh".source = ./p10k.zsh;

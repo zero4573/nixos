@@ -5,7 +5,7 @@ _: {
     wallpaper = ../../assets/fairy-tail.jpg;
     noctaliaJson = builtins.fromJSON (builtins.readFile ./noctalia.json);
 
-    settingsFile = pkgs.writeText "noctalia-settings.json" (builtins.toJSON (
+    settingsSeed = pkgs.writeText "noctalia-settings-seed.json" (builtins.toJSON (
       noctaliaJson.settings // {
         wallpaper = {
           enabled = true;
@@ -13,6 +13,8 @@ _: {
         };
       }
     ));
+
+    pluginsSeed = pkgs.writeText "noctalia-plugins-seed.json" (builtins.toJSON noctaliaJson.pluginRegistry);
 
     wallpaperCacheSeed = pkgs.writeText "noctalia-wallpapers-seed.json" (builtins.toJSON {
       wallpapers = noctaliaJson.state.wallpapers;
@@ -29,19 +31,26 @@ _: {
         PartOf = [ "graphical-session.target" ];
       };
       Service = {
-        Environment = "NOCTALIA_SETTINGS_FILE=${settingsFile}";
         ExecStart = lib.getExe pkgs.noctalia-shell;
         Restart = "on-failure";
       };
       Install.WantedBy = [ "graphical-session.target" ];
     };
 
-    home.activation.noctaliaWallpaperState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    home.activation.noctaliaConfigSeed = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      config_dir="${config.xdg.configHome}/noctalia"
       cache_dir="${config.xdg.cacheHome}/noctalia"
-      run mkdir -p "$cache_dir"
+      run mkdir -p "$config_dir" "$cache_dir"
 
-      # Note: this skips if a wallpaper has already been explicitly set
-      run cp -n ${wallpaperCacheSeed} "$cache_dir/wallpapers.json"
+      run cp -f ${settingsSeed} "$config_dir/settings.json"
+      run chmod u+w "$config_dir/settings.json"
+      run cp -f ${pluginsSeed} "$config_dir/plugins.json"
+      run chmod u+w "$config_dir/plugins.json"
+
+      run cp -f ${wallpaperCacheSeed} "$cache_dir/wallpapers.json"
+      run chmod u+w "$cache_dir/wallpapers.json"
+
+      run ${pkgs.systemd}/bin/systemctl --user try-restart noctalia.service
     '';
   };
 }

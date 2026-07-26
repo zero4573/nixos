@@ -1,5 +1,5 @@
 { self, ... }: {
-  flake.nixosModules.desktopProfile = { ... }: {
+  flake.nixosModules.desktopProfile = { pkgs, ... }: {
     imports = [
       self.nixosModules.commonConfigs
       self.nixosModules.audio
@@ -31,8 +31,12 @@
       "org.libreoffice.LibreOffice"
       "com.calibre_ebook.calibre"
       "com.rtosta.zapzap"
-      "org.remmina.Remmina"
       "com.sublimemerge.App"
+    ];
+
+    # Native packages when flatpak packages are failing for whatever reason
+    environment.systemPackages = [
+      pkgs.remmina
     ];
 
     programs.asdf.plugins = [
