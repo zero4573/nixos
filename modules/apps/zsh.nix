@@ -37,6 +37,14 @@ _: {
       enableZshIntegration = true;
     };
 
+    # fzf's zsh integration binds Ctrl+R (fuzzy history), Ctrl+T (fuzzy file
+    # finder), and Alt+C (fuzzy cd) -- it's also what zoxide's `zi` uses for
+    # interactive fuzzy directory selection.
+    programs.fzf = {
+      enable = true;
+      enableZshIntegration = true;
+    };
+
     home.file.".alias".text = ''
       # Shell aliases.
 
