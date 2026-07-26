@@ -21,6 +21,18 @@
       "::/0" = 40;
     };
 
+    # Allow for custom /etc/hosts management
+    environment.etc.hosts.enable = false;
+    system.activationScripts.etcHostsBaseline = ''
+      if [ ! -e /etc/hosts ]; then
+        {
+          echo "127.0.0.1 localhost"
+          echo ""
+          echo "127.0.0.2 ${cfg.hostName}"
+        } > /etc/hosts
+      fi
+    '';
+
     system.stateVersion = cfg.stateVersion;
 
     # Set your time zone.
