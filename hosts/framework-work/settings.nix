@@ -5,15 +5,9 @@ _: {
       user.name = "ato";
       user.description = "ato";
       profile = "work";
-      # TODO: set your git identity.
+
       git.userName = "Andy To";
       git.userEmail = "ato@streamsix.com";
-
-      # Per-remote signing/identity overrides (see modules/apps/git.nix).
-      # Both entries are inert until their signingKey TODO is filled in
-      # (empty contents get filtered out entirely) -- do that once the
-      # corresponding key has been added to 1Password's SSH agent (see
-      # modules/apps/onepassword.nix).
       git.identities = [
         {
           condition = "hasconfig:remote.*.url:*github.com*";

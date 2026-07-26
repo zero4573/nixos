@@ -1,9 +1,5 @@
 { self, inputs, ... }: {
 
-  # disko (see hosts/vm/disko.nix) generates fileSystems.* and
-  # boot.initrd.luks.devices.* for the root disk, so this module must NOT
-  # also declare root/boot filesystems or swapDevices. The virtiofs share
-  # mount lives in profiles/vm-guest.nix.
   flake.nixosModules.vmHardware = { config, lib, pkgs, modulesPath, ... }: {
     imports = [
       (modulesPath + "/profiles/qemu-guest.nix")

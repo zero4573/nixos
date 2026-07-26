@@ -1,9 +1,4 @@
 _: {
-  # 1Password: package, tray autostart, and its quick-access keybind, all in
-  # one place. Composed into workProfile, so it applies to framework-work and
-  # the vm -- the profile == "work" guard below is a belt-and-suspenders
-  # check so none of this activates if the module is ever pulled in from
-  # somewhere else.
   flake.nixosModules.onepassword = { config, pkgs, lib, ... }: lib.mkIf (config.hostConfig.profile == "work") {
     programs._1password.enable = true;
     programs._1password-gui = {

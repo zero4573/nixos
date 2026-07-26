@@ -10,6 +10,17 @@
 
     networking.hostName = cfg.hostName;
 
+    # Disable IPv6, as certain apps like intune will fail otherwise
+    networking.enableIPv6 = false;
+
+    # Overrides ipv6 address resolution precendence so that ipv4 are
+    # prefered
+    networking.getaddrinfo.precedence = {
+      "::ffff:0:0/96" = 100;
+      "::1/128" = 50;
+      "::/0" = 40;
+    };
+
     system.stateVersion = cfg.stateVersion;
 
     # Set your time zone.

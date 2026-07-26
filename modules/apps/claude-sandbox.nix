@@ -1,58 +1,31 @@
 _: {
-  # `claude-sandbox`: launches Claude Code inside a podman container scoped to
-  # the current project directory, with asdf (installs/shims/plugins -- see
-  # profiles/desktop.nix and profiles/work.nix for the plugin lists; asdf
-  # itself is wired up in modules/apps/zsh.nix) mounted in wholesale so it
-  # resolves .tool-versions natively inside the sandbox, exactly as it does
-  # on the host. Claude Code is fetched ephemerally via `nix build` rather
-  # than declared as a permanent package here.
+  # Creates a shell application to launch claude in a sandboxed environment
+  # with basic developer tools.
   #
-  # Only the project directory is mounted read-write. All of ~/.asdf is
-  # mounted read-only -- the safety property that matters is read-only, not
-  # scope, since it's what stops a compromised/misled run from planting a
-  # backdoored toolchain binary that would then run on the host outside the
-  # sandbox. Claude's own auth state (~/.claude, ~/.claude.json) is the one
-  # read-write exception, since without it every run would need a fresh
-  # login. This contains filesystem blast radius, not network egress: Claude
-  # needs outbound HTTPS for the Anthropic API, so podman's default rootless
-  # networking (modules/apps/containers.nix) is left untouched.
+  # Does the following:
+  #  * claude alias - sets up an alias so the `claude` command sets up a basic
+  #       claud in a nix shell, does not provide sandboxing, useful for
+  #       running claude to help with tasks that require access to the main os
+  #  * claude-sandbox - the scrip that runs claude in a sandbox, launches
+  #       in the current directory
   flake.homeModules.claudeSandbox = { pkgs, lib, ... }:
   let
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
       runtimeInputs = [ pkgs.podman pkgs.nix ];
       text = ''
-        # Walk up from $PWD looking for the nearest .tool-versions, mirroring
-        # asdf's own upward search, so the mounted project root matches what
-        # asdf would use to resolve versions.
         project_root="$PWD"
-        tool_versions=""
-        dir="$PWD"
-        while true; do
-          if [[ -f "$dir/.tool-versions" ]]; then
-            project_root="$dir"
-            tool_versions="$dir/.tool-versions"
-            break
-          fi
-          [[ "$dir" == "/" ]] && break
-          dir="$(dirname "$dir")"
-        done
-
-        if [[ -z "$tool_versions" ]]; then
-          echo "claude-sandbox: no .tool-versions found above $PWD; sandbox will have no language toolchains" >&2
-        fi
-
         asdf_data_dir="$HOME/.asdf"
 
-        # Fetch Claude Code ephemerally -- never declared as a permanent
-        # package, so nothing here persists outside the Nix store's own
-        # cache.
-        claude_out="$(nix build --no-link --print-out-paths 'nixpkgs#claude-code')"
+        export NIXPKGS_ALLOW_UNFREE=1
+        claude_out="$(NIXPKGS_ALLOW_UNFREE=1 nix build \
+            --impure \
+            --no-link \
+            --print-out-paths \
+            'nixpkgs#claude-code'
+        )"
 
-        # Claude's own auth/session state is the one exception to
-        # "project dir only": it's the tool's state, not the rest of the
-        # system, and without it every sandboxed run would need a fresh
-        # login.
+        # Claude's own auth/session state
         mkdir -p "$HOME/.claude"
         touch "$HOME/.claude.json"
 
@@ -74,12 +47,8 @@ _: {
   in {
     home.packages = [ claudeSandbox ];
 
-    # Short convenience alias; home.file.".alias".text is `types.lines`, so
-    # this concatenates with the aliases set in modules/apps/zsh.nix rather
-    # than conflicting with them.
     home.file.".alias".text = ''
       alias claude='NIXPKGS_ALLOW_UNFREE=1 nix-shell -p claude-code --run "claude"'
-      alias ccs='claude-sandbox'
     '';
   };
 }

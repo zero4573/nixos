@@ -1,8 +1,4 @@
 { self, ... }: {
-  # Standard desktop shared by all hosts: compositor + shell, core GUI apps,
-  # containers, flatpak and home-manager. noctalia (bar/shell) is installed
-  # and autostarted entirely via home-manager (self.homeModules.noctalia,
-  # wired in through homeBase below), same as vicinae.
   flake.nixosModules.desktopProfile = { ... }: {
     imports = [
       self.nixosModules.commonConfigs
@@ -23,14 +19,12 @@
       self.nixosModules.containers
       self.nixosModules.screenshot
       self.nixosModules.zsh
+      self.nixosModules.zed
 
-      # Flatpak mechanism (enable + flathub remote) + user dotfiles
       self.nixosModules.flatpakBase
       self.nixosModules.homeBase
     ];
 
-    # Base Flatpak apps present on every desktop host. Host profiles append
-    # host-specific apps to services.flatpak.packages (it merges).
     services.flatpak.packages = [
       "com.github.tchx84.Flatseal"
       "com.discordapp.Discord"
@@ -41,9 +35,6 @@
       "com.sublimemerge.App"
     ];
 
-    # Base asdf plugins present on every desktop host. Host profiles append
-    # more to programs.asdf.plugins (it merges); see modules/apps/zsh.nix for
-    # where these actually get installed.
     programs.asdf.plugins = [
       "golang"
       "java"

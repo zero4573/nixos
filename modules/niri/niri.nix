@@ -1,9 +1,8 @@
 { self, inputs, ... }:
 let
   # Builds the niri `settings` attrset. `extraBinds` lets other modules
-  # (onepassword, workProfile, ...) contribute additional keybinds without
-  # this file needing to know about them -- see programs.niri.extraBinds in
-  # hosts/options.nix.
+  # contribute additional keybinds without this file needing to know about them
+  # see programs.niri.extraBinds in hosts/options.nix.
   mkNiriSettings = { pkgs, lib, system, extraBinds ? { } }:
   let
     vicinae = "${inputs.vicinae.packages.${system}.default}/bin/vicinae";
@@ -21,62 +20,45 @@ let
     }) (lib.range 1 9));
   in {
     spawn-at-startup = [
-      # jetbrains toolbox, started minimized (installed on all desktops).
       [ (lib.getExe pkgs.jetbrains-toolbox) "--minimize" ]
       (lib.getExe pkgs.brave)
-      # ZapZap/Discord are flatpak apps (see modules/flatpak/flatpak.nix).
-      [ (lib.getExe pkgs.flatpak) "run" "com.rtosta.zapzap" ]
-      [ (lib.getExe pkgs.flatpak) "run" "com.discordapp.Discord" ]
-      # NOTE: noctalia and vicinae are autostarted via systemd user
-      # services (see their own modules). Work-only apps (1Password,
-      # Teams PWA) autostart via their own modules (onepassword.nix,
-      # profiles/work.nix).
+      [ (lib.getExe pkgs.flatpak) "run" "com.discordapp.Discord" "--start-minimized" ]
     ];
 
+    spawn-sh-at-startup = [
+      ''${lib.getExe pkgs.flatpak} run com.rtosta.zapzap --setSettings system/start_background true && ${lib.getExe pkgs.flatpak} run com.rtosta.zapzap''
+    ];
+
+    workspaces = {
+      "teams" = { };
+      "browser" = { };
+    };
+
+    # For legacy X11 applications
     xwayland-satellite.path = lib.getExe pkgs.xwayland-satellite;
 
-    # Don't show the "Important Hotkeys" pop-up at startup (still reachable
-    # via the Super+Shift+Escape bind below).
+    outputs."eDP-1".scale = 1.0;
     hotkey-overlay.skip-at-startup = _: { };
-
     input.keyboard.xkb.layout = "us";
 
-    # Disable the mouse hot corner that toggles the overview (niri's default
-    # is the top-left corner; whichever corner it's felt at, this turns it
-    # off entirely). Overview is still reachable via its own bind below.
     gestures.hot-corners.off = _: { };
-
-    # Tap-to-click, with clicks determined by finger count rather than
-    # where on the pad you press (avoids accidental right-clicks from a
-    # push near a corner/edge).
     input.touchpad = {
       tap = _: { };
       click-method = "clickfinger";
     };
 
-    # Framework 13 2.8K panel (2880x1920) -- niri auto-picks scale 2 for a
-    # panel this dense, but that halves usable real estate (effectively a
-    # 1440x960 canvas). Run unscaled instead, at the panel's native pixel
-    # resolution.
-    outputs."eDP-1".scale = 1.0;
     layout.gaps = 5;
     layout.focus-ring = {
       width = 2;
       active-color = "darkred";
     };
 
-    # Global rounded corners. clip-to-geometry actually clips window content
-    # to the rounded shape; geometry-corner-radius also tells niri the
-    # window's radius so it rounds the focus ring/border/shadow drawn around
-    # it to match, automatically -- there's no separate focus-ring radius.
     window-rules = [
       {
         geometry-corner-radius = 12;
         clip-to-geometry = true;
       }
-      # Floating windows use the same focus-ring settings as tiled ones by
-      # default (there's no separate global "floating" section), but this
-      # makes it explicit/guaranteed rather than relying on that default.
+
       {
         matches = [ { is-floating = true; } ];
         focus-ring = {
@@ -84,14 +66,25 @@ let
           active-color = "darkred";
         };
       }
+
+      {
+        matches = [
+          { app-id = "^discord$"; }
+          { app-id = "^com\\.rtosta\\.zapzap$"; }
+        ];
+        open-focused = false;
+      }
+
+      {
+        matches = [ { app-id = "teams.microsoft.com"; at-startup = true; } ];
+        open-on-workspace = "teams";
+      }
+      {
+        matches = [ { app-id = "^brave-browser$"; at-startup = true; } ];
+        open-on-workspace = "browser";
+      }
     ];
 
-    # Keybinds follow CachyOS's niri scheme
-    # (https://wiki.cachyos.org/configuration/desktop_environments/niri/),
-    # with apps substituted for what's actually installed here: alacritty
-    # (terminal), brave (browser), thunar (file manager), vicinae (app
-    # launcher), and noctalia over IPC (wallpaper/control center/settings/
-    # lock screen/session menu/volume/brightness/media).
     binds = {
       "Super+Shift+Escape"."show-hotkey-overlay" = { };
 
@@ -260,10 +253,7 @@ let
       "Super+W"."toggle-column-tabbed-display" = { };
       "Super+M"."maximize-window-to-edges" = { };
 
-      # -- Screenshots (flameshot; saved to ~/Pictures/Screenshots and
-      # copied to the clipboard). Flameshot has no direct equivalent of
-      # niri's screenshot-window, so the window bind also opens the
-      # interactive GUI -- select the window's area manually.
+      # -- Screenshots
       "Ctrl+Shift+1" = _: {
         props.hotkey-overlay-title = "Screenshot (select area): flameshot";
         content.spawn-sh = "mkdir -p ~/Pictures/Screenshots && ${lib.getExe pkgs.flameshot} gui -p ~/Pictures/Screenshots -c";
@@ -342,20 +332,15 @@ in {
       ];
     };
 
-    # Unlock the login keyring automatically at login. services.gnome.gnome-keyring
-    # wires pam_gnome_keyring into the "login" PAM service; SDDM's own PAM
-    # service (auth/account/password/session) just substacks "login" (see
-    # nixpkgs' sddm module), so this covers SDDM logins too. It does *not*
-    # cover the separate "passwd" PAM service, though, so `passwd` still needs
-    # its own line to keep the keyring's password in sync when changed.
     services.gnome.gnome-keyring.enable = true;
     security.pam.services.passwd.enableGnomeKeyring = true;
+
+    # required for itune, without it, attempting to sign in result in a
+    # error code 2605, "no internet connection"
+    services.gnome.glib-networking.enable = true;
   };
 
   perSystem = { pkgs, lib, system, ... }: {
-    # Convenience/test artifact only (`nix build .#customNiri`); real hosts
-    # build their own via mkNiriSettings above, with their own
-    # programs.niri.extraBinds contributions merged in.
     packages.customNiri = inputs.wrapper-modules.wrappers.niri.wrap {
       inherit pkgs;
       settings = mkNiriSettings { inherit pkgs lib system; };

@@ -13,6 +13,8 @@
     "anthropic_retention": false
   },
   "vim_mode": false,
+  "show_whitespaces": "all",
+  "remove_trailing_whitespace_on_save": true,
   "agent_servers": {
     "claude-acp": {
       "type": "registry"

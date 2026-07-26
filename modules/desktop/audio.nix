@@ -1,5 +1,4 @@
 _: {
-  # Shared PipeWire audio stack for all desktop hosts.
   flake.nixosModules.audio = { ... }: {
     services.pulseaudio.enable = false;
     security.rtkit.enable = true;

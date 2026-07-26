@@ -20,8 +20,9 @@
           self.homeModules.desktopHome
           self.homeModules.noctalia
           self.homeModules.vicinaeConfig
+          self.homeModules.terminals
+          self.homeModules.browsers
           self.homeModules.thunar
-          self.homeModules.screenshot
           self.homeModules.mpd
           self.homeModules.zsh
           self.homeModules.nodatacow

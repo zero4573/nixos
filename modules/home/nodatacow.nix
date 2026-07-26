@@ -1,17 +1,11 @@
 _: {
-  # Marks selected per-user data directories nodatacow (chattr +C) for apps
-  # whose files are genuine, frequently-rewritten SQLite databases -- COW +
-  # compression on small random-write DB files fragments badly, same
-  # rationale as the /libvirt, /var/lib/flatpak, /var/lib/containers disko
-  # subvolumes (hosts/*/disko.nix), just at the per-user layer since disko
-  # subvolumes don't know the primary user's name.
+  # Marks selected per-user data directories nodatacow (chattr +C).  Used for
+  # things like SQLite db's that have frequent writes and don't need COW as
+  # it would force a full re-journal of the file on each update
   #
-  # CAVEAT: chattr +C only affects files created AFTER it's set on a
-  # directory -- it does not retroactively convert already-written extents.
-  # On a fresh profile this is moot; on an existing one, affected databases
-  # keep old COW extents until rewritten wholesale. This is a one-time,
-  # opportunistic setting, not a guarantee for pre-existing data. chattr +C
-  # doesn't require root for the user's own files (unlike +i/+a).
+  # NOTE: chattr +C only affects files created AFTER it's set on a
+  # directory.  This can be forced by moving the db's and re-copying them
+  # back.  THIS MUST BE A COPY, moving the file back will retain its attr
   flake.homeModules.nodatacow = { config, lib, pkgs, ... }:
   let
     dirs = [
