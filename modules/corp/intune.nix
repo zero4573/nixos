@@ -6,7 +6,9 @@ _: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.makeWrapper ];
           postFixup = (old.postFixup or "") + ''
             wrapProgram $out/bin/microsoft-identity-broker \
-              --set WEBKIT_DISABLE_DMABUF_RENDERER 1
+              --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+              --set WEBKIT_DISABLE_COMPOSITING_MODE 1 \
+              --set GDK_BACKEND x11
           '';
         });
 
@@ -14,7 +16,9 @@ _: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.makeWrapper ];
           postFixup = (old.postFixup or "") + ''
             wrapProgram $out/bin/intune-portal \
-              --set WEBKIT_DISABLE_DMABUF_RENDERER 1
+              --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+              --set WEBKIT_DISABLE_COMPOSITING_MODE 1 \
+              --set GDK_BACKEND x11
           '';
         });
       })
