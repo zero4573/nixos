@@ -57,6 +57,26 @@
     # NixOS has no FHS paths for the loader/libs they expect, so this provides one.
     programs.nix-ld.enable = true;
 
+    # Extra libs beyond nix-ld's default set
+    programs.nix-ld.libraries = with pkgs; [
+      libxinerama
+      libx11
+      libxext
+      libxcb
+      libxcb-util
+      libsm
+      libice
+      libglvnd
+      libxkbcommon
+      keyutils
+      util-linux
+      zstd
+      fontconfig
+      freetype
+      dbus
+      systemd
+    ];
+
     environment.systemPackages = with pkgs; [
       git
       btop
