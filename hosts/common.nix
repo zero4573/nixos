@@ -63,6 +63,7 @@
       lazygit
       yt-dlp
       zip
+      unzip
       jq
       gnumake
 
