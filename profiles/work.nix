@@ -28,7 +28,10 @@
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];
-      environment.TZ = "Canada/Eastern";
+      environment = {
+        TZ = "${config.hostConfig.timezone}";
+        NIXOS_OZONE_WL = "1";
+      };
       serviceConfig = {
         ExecStart = "${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/";
         Restart = "on-failure";
@@ -36,7 +39,7 @@
     };
 
     programs.niri.extraBinds."Super+Shift+T".spawn-sh =
-      ''TZ="Canada/Eastern" ${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/'';
+      ''TZ="${config.hostConfig.timezone}" ${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/'';
 
     # 1Password SSH agent integration
     #
