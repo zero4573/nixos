@@ -79,6 +79,7 @@
 
     environment.systemPackages = with pkgs; [
       git
+      git-lfs
       btop
       lazygit
       yt-dlp
