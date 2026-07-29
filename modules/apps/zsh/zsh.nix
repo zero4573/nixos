@@ -74,6 +74,7 @@ _: {
 
           source "${pkgs.asdf-vm}/etc/profile.d/asdf-prepare.sh"
           [ -f "$HOME/.alias" ] && source "$HOME/.alias"
+          [ -f "$HOME/.playground" ] && source "$HOME/.playground"
         ''
 
         # p10k's own convention is to source ~/.p10k.zsh last, after the theme
