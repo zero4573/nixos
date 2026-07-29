@@ -94,6 +94,30 @@
       e2fsprogs
     ];
 
+    # Add build dependencies
+    environment.sessionVariables =
+      let
+        buildFromSourceDeps = with pkgs; [
+          zlib
+          openssl
+          bzip2
+          readline
+          sqlite
+          ncurses
+          libffi
+          xz
+          gdbm
+          libuuid
+          expat
+          libxcrypt
+        ];
+      in
+      {
+        CPATH = lib.makeSearchPathOutput "dev" "include" buildFromSourceDeps;
+        LIBRARY_PATH = lib.makeLibraryPath buildFromSourceDeps;
+        PKG_CONFIG_PATH = lib.makeSearchPathOutput "dev" "lib/pkgconfig" buildFromSourceDeps;
+      };
+
     programs.neovim = {
       enable = true;
       defaultEditor = true;
