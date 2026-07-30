@@ -1,5 +1,8 @@
 _: {
-  flake.nixosModules.frameworkWorkSettings = { ... }: {
+  flake.nixosModules.frameworkWorkSettings = { config, ... }:
+  let
+    home = "/home/${config.hostConfig.user.name}";
+  in {
     hostConfig = {
       hostName = "ato-fw-work";
       user.name = "ato";
@@ -13,15 +16,13 @@ _: {
           condition = "hasconfig:remote.*.url:*github.com*";
           userName = "Andy To";
           userEmail = "andya.to@gmail.com";
-          # TODO: paste your personal SSH public key here.
-          signingKey = "";
+          signingKey = "${home}/.ssh/private.pub";
         }
         {
           condition = "hasconfig:remote.*.url:*bitbucket.org*";
           userName = "Andy To";
           userEmail = "ato@streamsix.com";
-          # TODO: paste your work SSH public key here.
-          signingKey = "";
+          signingKey = "${home}/.ssh/work.pub";
         }
       ];
     };

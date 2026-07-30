@@ -1,5 +1,7 @@
 _: {
   flake.homeModules.git = { osConfig, lib, ... }: {
+    programs.git.enable = true;
+
     programs.git.includes = lib.pipe osConfig.hostConfig.git.identities [
       (map (identity:
         let
