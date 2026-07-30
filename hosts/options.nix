@@ -88,7 +88,9 @@
                 type = lib.types.str;
                 description = ''
                   git includeIf condition (see git-config(1)), e.g.
-                  "hasconfig:remote.*.url:*github.com*".
+                  "hasconfig:remote.*.url:*github.com*/**". Note the
+                  trailing "/**": a bare "*" doesn't cross a "/", so it
+                  won't match SSH-style remotes (git@host:owner/repo.git).
                 '';
               };
               userName = lib.mkOption {

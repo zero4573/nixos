@@ -13,13 +13,13 @@ _: {
       git.userEmail = "ato@streamsix.com";
       git.identities = [
         {
-          condition = "hasconfig:remote.*.url:*github.com*";
+          condition = "hasconfig:remote.*.url:*github.com*/**";
           userName = "Andy To";
           userEmail = "andya.to@gmail.com";
           signingKey = "${home}/.ssh/private.pub";
         }
         {
-          condition = "hasconfig:remote.*.url:*bitbucket.org*";
+          condition = "hasconfig:remote.*.url:*bitbucket.org*/**";
           userName = "Andy To";
           userEmail = "ato@streamsix.com";
           signingKey = "${home}/.ssh/work.pub";
