@@ -1,5 +1,5 @@
 { self, ... }: {
-  flake.nixosModules.desktopProfile = { pkgs, ... }: {
+  flake.nixosModules.desktopProfile = { pkgs, config, ... }: {
     imports = [
       self.nixosModules.commonConfigs
       self.nixosModules.audio
@@ -45,5 +45,9 @@
       "python"
       "nodejs"
     ];
+
+    home-manager.users.${config.hostConfig.user.name}.home.shellAliases = {
+      sublime-merge = "flatpak run com.sublimemerge.App";
+    };
   };
 }
