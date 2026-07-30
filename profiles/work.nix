@@ -18,6 +18,10 @@
       "us.zoom.Zoom"
     ];
 
+    environment.systemPackages = [
+      pkgs.awscli2
+    ];
+
     programs.asdf.plugins = [
       "terraform"
       "packer"

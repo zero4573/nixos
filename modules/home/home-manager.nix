@@ -29,6 +29,7 @@
           self.homeModules.git
           self.homeModules.zed
           self.homeModules.claudeSandbox
+          self.homeModules.npmSandbox
         ];
       };
     };
