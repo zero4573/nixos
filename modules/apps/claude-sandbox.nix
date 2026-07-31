@@ -26,6 +26,7 @@ _: {
       name = "claude-sandbox-nested-podman";
       paths = with pkgs; [
         podman
+        podman-compose
         conmon
         crun
         netavark
