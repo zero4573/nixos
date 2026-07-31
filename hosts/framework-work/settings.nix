@@ -16,7 +16,7 @@ _: {
           condition = "hasconfig:remote.*.url:*github.com*/**";
           userName = "Andy To";
           userEmail = "andya.to@gmail.com";
-          signingKey = "${home}/.ssh/private.pub";
+          signingKey = "${home}/.ssh/personal.pub";
         }
         {
           condition = "hasconfig:remote.*.url:*bitbucket.org*/**";
