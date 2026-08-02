@@ -37,6 +37,7 @@
     # Native packages when flatpak packages are failing for whatever reason
     environment.systemPackages = [
       pkgs.remmina
+      pkgs.xournalpp
     ];
 
     programs.asdf.plugins = [
