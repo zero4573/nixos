@@ -16,7 +16,10 @@ _: {
   #       unprivileged host uid, not the container's mapped "root") -- it
   #       does not grant host root or touch the host's own podman/docker
   #       socket. Nested container storage lives in the outer container's
-  #       own ephemeral rootfs, so it never persists past `--rm`.
+  #       own ephemeral rootfs, so it never persists past `--rm`. Accepts an
+  #       optional leading `--ports <comma-separated list>` to publish ports
+  #       from the container to the same port on the host, e.g.
+  #       `claude-sandbox --ports 3000,5173`
   flake.homeModules.claudeSandbox = { pkgs, lib, ... }:
   let
     # Toolchain for the NESTED podman running inside the sandbox container.
@@ -80,6 +83,23 @@ _: {
       name = "claude-sandbox";
       runtimeInputs = [ pkgs.podman pkgs.nix ];
       text = ''
+        port_flags=()
+        if [[ $# -gt 0 && "$1" == "--ports" ]]; then
+          if [[ $# -lt 2 ]]; then
+            echo "claude-sandbox: --ports requires a value" >&2
+            exit 1
+          fi
+          IFS=',' read -ra ports <<< "$2"
+          for p in "''${ports[@]}"; do
+            if ! [[ "$p" =~ ^[0-9]+$ ]]; then
+              echo "claude-sandbox: --ports value must be a comma-separated list of numbers: $p" >&2
+              exit 1
+            fi
+            port_flags+=(-p "$p:$p")
+          done
+          shift 2
+        fi
+
         project_root="$PWD"
         asdf_data_dir="$HOME/.asdf"
 
@@ -98,6 +118,7 @@ _: {
         exec podman run --rm -it \
           --privileged \
           --pull=missing \
+          "''${port_flags[@]}" \
           -v /nix/store:/nix/store:ro \
           -v "$project_root:$project_root:rw" \
           -w "$PWD" \
