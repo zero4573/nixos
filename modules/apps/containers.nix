@@ -7,6 +7,8 @@ _: {
       defaultNetwork.settings.dns_enabled = true;
     };
 
+    virtualisation.containers.registries.search = [ "docker.io" ];
+
     users.users.${config.hostConfig.user.name}.extraGroups = [ "podman" ];
 
     environment.systemPackages = with pkgs; [
