@@ -1,3 +1,27 @@
+port_flags=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --ports)
+      if [[ $# -lt 2 ]]; then
+        echo "npm-sandbox: --ports requires a value" >&2
+        exit 1
+      fi
+      IFS=',' read -ra ports <<< "$2"
+      for p in "${ports[@]}"; do
+        if ! [[ "$p" =~ ^[0-9]+$ ]]; then
+          echo "npm-sandbox: --ports value must be a comma-separated list of numbers: $p" >&2
+          exit 1
+        fi
+        port_flags+=(-p "$p:$p")
+      done
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 project_root="$PWD"
 
 if ! current_line="$(asdf current nodejs --no-header 2>&1)"; then
@@ -27,6 +51,7 @@ fi
 
 podman run --rm \
   --pull=missing \
+  "${port_flags[@]}" \
   "${network_flags[@]}" \
   "${mounts[@]}" \
   -w "$project_root" \
