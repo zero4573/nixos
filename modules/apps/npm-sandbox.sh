@@ -49,7 +49,7 @@ if command -v registry-proxy >/dev/null 2>&1 && registry-proxy configured; then
   fi
 fi
 
-podman run --rm \
+podman run --rm -it \
   --pull=missing \
   "${port_flags[@]}" \
   "${network_flags[@]}" \
