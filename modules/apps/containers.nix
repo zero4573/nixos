@@ -11,6 +11,7 @@ _: {
 
     environment.systemPackages = with pkgs; [
       lazydocker
+      podman-compose
     ];
   };
 }
