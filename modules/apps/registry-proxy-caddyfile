@@ -1,0 +1,22 @@
+# go proxy, adds credentials to all requests going through here via
+# basic auth
+:7080 {
+	reverse_proxy https://{$ARTIFACTORY_HOST} {
+		header_up Host {$ARTIFACTORY_HOST}
+		header_up Authorization "Basic {$ARTIFACTORY_BASIC_AUTH}"
+	}
+}
+
+# npm proxy, incomming vhost will be set to the artifactory host (https)
+# sandboxes will disable tls as the certs are self signed, and setting
+# up a full cert chain for this isn't worth the fragility
+#
+# doing things this way allows our package-lock.json to e created with
+# the intended private domains, without this, we would have to regenerate
+# the lock file after each claude session, and claude will spend needless
+# tokens re-evaluating the lockfile
+https://{$ARTIFACTORY_HOST} {
+	tls internal
+	uri strip_prefix {$NPM_STRIP_PREFIX}
+	reverse_proxy npm-proxy:4873
+}

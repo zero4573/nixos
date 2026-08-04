@@ -6,20 +6,18 @@ _: {
   #  * claude alias - sets up an alias so the `claude` command sets up a basic
   #       claud in a nix shell, does not provide sandboxing, useful for
   #       running claude to help with tasks that require access to the main os
-  #  * claude-sandbox - the scrip that runs claude in a sandbox, launches
-  #       in the current directory. Runs the outer container `--privileged`
-  #       so claude can create its own nested rootless podman containers for
-  #       throwaway builds/tests. This is safe because the outer container
-  #       itself is still a rootless podman container: `--privileged` only
-  #       grants full capabilities within that already-namespaced boundary,
-  #       and real host devices stay unreadable (checked against the real
-  #       unprivileged host uid, not the container's mapped "root") -- it
-  #       does not grant host root or touch the host's own podman/docker
-  #       socket. Nested container storage lives in the outer container's
-  #       own ephemeral rootfs, so it never persists past `--rm`. Accepts an
-  #       optional leading `--ports <comma-separated list>` to publish ports
-  #       from the container to the same port on the host, e.g.
-  #       `claude-sandbox --ports 3000,5173`
+  #  * claude-sandbox - the script that runs claude in a sandbox, launches
+  #       in the current directory. Claude is launched with asdf tools, and
+  #       the ability to spawn its own containers, sandboxed to the running
+  #       claude-sandbox container.  You can provide the additional run
+  #       arguemnt `--ports 3000,5173` to mount the claude containers ports
+  #       so you can locally connect to applications the sandboxed claude
+  #       brings up if needed.  This will automatically join the registry-proxy
+  #       broker network (see modules/apps/registry-proxy.nix) whenever
+  #       `registry-proxy host-login` has been configured
+  #
+  # Script bodies live in sibling .sh files (claude-sandbox.sh,
+  # claude-sandbox-nested-podman-setup.sh)
   flake.homeModules.claudeSandbox = { pkgs, lib, ... }:
   let
     # Toolchain for the NESTED podman running inside the sandbox container.
@@ -40,97 +38,18 @@ _: {
       ];
     };
 
-    # Runs once at container start, before handing off to claude, to wire up
-    # a self-contained podman storage/config for the nested podman.
-    nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup" ''
-      set -e
-      mkdir -p /etc/containers /var/lib/containers/storage /run/containers/storage
-      echo "root:1:65535" > /etc/subuid
-      echo "root:1:65535" > /etc/subgid
-
-      cat > /etc/containers/storage.conf <<EOF
-      [storage]
-      driver = "overlay"
-      runroot = "/run/containers/storage"
-      graphroot = "/var/lib/containers/storage"
-      EOF
-
-      cat > /etc/containers/registries.conf <<EOF
-      unqualified-search-registries = ["docker.io"]
-      EOF
-
-      cat > /etc/containers/policy.json <<'INNEREOF'
-      { "default": [{ "type": "insecureAcceptAnything" }] }
-      INNEREOF
-
-      cat > /etc/containers/containers.conf <<EOF
-      [engine]
-      conmon_path = ["${nestedPodmanEnv}/bin/conmon"]
-      runtime = "crun"
-      [engine.runtimes]
-      crun = ["${nestedPodmanEnv}/bin/crun"]
-      [network]
-      network_backend = "netavark"
-      EOF
-
-      export XDG_RUNTIME_DIR=/run/user/0
-      mkdir -p "$XDG_RUNTIME_DIR"
-
-      exec "$@"
-    '';
+    nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
+      (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
       runtimeInputs = [ pkgs.podman pkgs.nix ];
       text = ''
-        port_flags=()
-        if [[ $# -gt 0 && "$1" == "--ports" ]]; then
-          if [[ $# -lt 2 ]]; then
-            echo "claude-sandbox: --ports requires a value" >&2
-            exit 1
-          fi
-          IFS=',' read -ra ports <<< "$2"
-          for p in "''${ports[@]}"; do
-            if ! [[ "$p" =~ ^[0-9]+$ ]]; then
-              echo "claude-sandbox: --ports value must be a comma-separated list of numbers: $p" >&2
-              exit 1
-            fi
-            port_flags+=(-p "$p:$p")
-          done
-          shift 2
-        fi
-
-        project_root="$PWD"
-        asdf_data_dir="$HOME/.asdf"
-
-        export NIXPKGS_ALLOW_UNFREE=1
-        claude_out="$(NIXPKGS_ALLOW_UNFREE=1 nix build \
-            --impure \
-            --no-link \
-            --print-out-paths \
-            'nixpkgs#claude-code'
-        )"
-
-        # Claude's own auth/session state
-        mkdir -p "$HOME/.claude"
-        touch "$HOME/.claude.json"
-
-        exec podman run --rm -it \
-          --privileged \
-          --pull=missing \
-          "''${port_flags[@]}" \
-          -v /nix/store:/nix/store:ro \
-          -v "$project_root:$project_root:rw" \
-          -w "$PWD" \
-          -v "$asdf_data_dir:$asdf_data_dir:ro" \
-          -v "$HOME/.claude:$HOME/.claude:rw" \
-          -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
-          -e HOME="$HOME" \
-          -e ASDF_DATA_DIR="$asdf_data_dir" \
-          -e SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
-          -e PATH="$asdf_data_dir/shims:${pkgs.asdf-vm}/bin:${nestedPodmanEnv}/bin:$claude_out/bin:/usr/bin:/bin" \
-          docker.io/library/debian:stable-slim \
-          ${nestedPodmanSetup} "$claude_out/bin/claude" "$@"
+        export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
+        export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
+        export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
+        export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+        exec bash ${./claude-sandbox.sh} "$@"
       '';
     };
   in {

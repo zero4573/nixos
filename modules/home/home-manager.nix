@@ -28,8 +28,10 @@
           self.homeModules.nodatacow
           self.homeModules.git
           self.homeModules.zed
+          self.homeModules.claudeCode
           self.homeModules.claudeSandbox
           self.homeModules.npmSandbox
+          self.homeModules.registryProxy
         ];
       };
     };
