@@ -84,11 +84,18 @@ discover_config() {
   fi
 
   if [ -f "$HOME/.custom" ]; then
-    local goproxy_line goproxy no_scheme no_userinfo
+    local goproxy_line goproxy first_entry no_scheme no_userinfo
     goproxy_line="$(grep -m1 '^export GOPROXY=' "$HOME/.custom" || true)"
     if [ -n "$goproxy_line" ]; then
       goproxy="${goproxy_line#export GOPROXY=}"
-      no_scheme="${goproxy#https://}"
+      case "$goproxy" in
+        \"*\") goproxy="${goproxy#\"}"; goproxy="${goproxy%\"}" ;;
+        \'*\') goproxy="${goproxy#\'}"; goproxy="${goproxy%\'}" ;;
+      esac
+      # GOPROXY may carry a fallback chain after ours (see cmd_host_login) --
+      # only our own entry (the first one) is relevant here.
+      first_entry="${goproxy%%,*}"
+      no_scheme="${first_entry#https://}"
       no_scheme="${no_scheme#http://}"
 
       # Strip an embedded user:pass@ userinfo prefix, if present
