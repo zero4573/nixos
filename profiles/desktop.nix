@@ -17,6 +17,7 @@
       self.nixosModules.terminals
       self.nixosModules.dev
       self.nixosModules.containers
+      self.nixosModules.joplin
       self.nixosModules.screenshot
       self.nixosModules.zsh
       self.nixosModules.zed
