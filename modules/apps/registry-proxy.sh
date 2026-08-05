@@ -149,11 +149,27 @@ cmd_host_login() {
   if [ -n "$go_repo" ]; then
     # GOPROXY carries its own Basic Auth credentials (https://user:pass@host/path)
     local go_path="artifactory/api/go/$go_repo" custom enc_user enc_pass goproxy_url
+    local existing_goproxy fallback
     enc_user="$(jq -rn --arg s "$ARTIFACTORY_USER" '$s|@uri')"
     enc_pass="$(jq -rn --arg s "$ARTIFACTORY_PASS" '$s|@uri')"
     goproxy_url="https://$enc_user:$enc_pass@$host/$go_path"
     custom="$HOME/.custom"
-    grep -v '^export GOPROXY=' "$custom" > "$custom.tmp" || true
+
+    # Keep any existing goproxy fallbacks, if none exist, then use default fallbacks
+    existing_goproxy="$(grep -m1 '^export GOPROXY=' "$custom" 2>/dev/null || true)"
+    existing_goproxy="${existing_goproxy#export GOPROXY=}"
+
+    case "$existing_goproxy" in
+      \"*\") existing_goproxy="${existing_goproxy#\"}"; existing_goproxy="${existing_goproxy%\"}" ;;
+      \'*\') existing_goproxy="${existing_goproxy#\'}"; existing_goproxy="${existing_goproxy%\'}" ;;
+    esac
+    fallback="${existing_goproxy#*,}"
+    if [ -z "$existing_goproxy" ] || [ "$fallback" = "$existing_goproxy" ]; then
+      fallback="https://proxy.golang.org,direct"
+    fi
+    goproxy_url="$goproxy_url,$fallback"
+
+    grep -v '^export GOPROXY=' "$custom" > "$custom.tmp" 2>/dev/null || true
     mv "$custom.tmp" "$custom"
     echo "export GOPROXY=$goproxy_url" >> "$custom"
     chmod 600 "$custom"
