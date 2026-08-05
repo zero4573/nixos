@@ -7,7 +7,7 @@ _: {
       defaultNetwork.settings.dns_enabled = true;
     };
 
-    virtualisation.containers.registries.search = [ "docker.io" ];
+    virtualisation.containers.registries.settings.unqualified-search-registries = [ "docker.io" ];
 
     users.users.${config.hostConfig.user.name}.extraGroups = [ "podman" ];
 
