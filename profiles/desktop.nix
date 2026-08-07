@@ -21,6 +21,7 @@
       self.nixosModules.screenshot
       self.nixosModules.zsh
       self.nixosModules.zed
+      self.nixosModules.vscode
 
       self.nixosModules.flatpakBase
       self.nixosModules.homeBase
@@ -46,6 +47,8 @@
       "java"
       "python"
       "nodejs"
+      "erlang"
+      "elixir"
     ];
 
     home-manager.users.${config.hostConfig.user.name}.home.shellAliases = {

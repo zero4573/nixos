@@ -90,10 +90,17 @@
       bind
       gcc
       pkg-config
+      autoconf
+      automake
+      m4
 
       # chattr/lsattr -- otherwise only pulled in as an internal dependency
       # of modules/home/nodatacow.nix, not on the interactive PATH.
       e2fsprogs
+
+      # openssl/odbcinst/isql CLIs, for interactive use.
+      openssl
+      unixodbc
     ];
 
     # Add build dependencies
@@ -112,12 +119,27 @@
           libuuid
           expat
           libxcrypt
+          unixodbc
         ];
+
+        # kerl/erlang's ./configure (lib/crypto, lib/odbc) doesn't use
+        # pkg-config or CPATH/LIBRARY_PATH to find OpenSSL/ODBC, it uses
+        # --with-ssl=PATH / --with-odbc=PATH that must contain both
+        # PATH/include and PATH/lib under one root. Nix splits those into
+        # separate dev/lib outputs, so build merged trees to point at
+        mergeIncludeLib = name: pkg: pkgs.runCommand "${name}-merged" { } ''
+          mkdir -p $out
+          ln -s ${lib.getLib pkg}/lib $out/lib
+          ln -s ${lib.getDev pkg}/include $out/include
+        '';
+        opensslMerged = mergeIncludeLib "openssl" pkgs.openssl;
+        unixodbcMerged = mergeIncludeLib "unixodbc" pkgs.unixodbc;
       in
       {
         CPATH = lib.makeSearchPathOutput "dev" "include" buildFromSourceDeps;
         LIBRARY_PATH = lib.makeLibraryPath buildFromSourceDeps;
         PKG_CONFIG_PATH = lib.makeSearchPathOutput "dev" "lib/pkgconfig" buildFromSourceDeps;
+        KERL_CONFIGURE_OPTIONS = "--with-ssl=${opensslMerged} --with-odbc=${unixodbcMerged}";
       };
 
     programs.neovim = {
