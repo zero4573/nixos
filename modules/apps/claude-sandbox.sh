@@ -1,4 +1,6 @@
 port_flags=()
+dir_mounts=()
+add_dir_flags=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ports)
@@ -15,6 +17,51 @@ while [[ $# -gt 0 ]]; do
         port_flags+=(-p "$p:$p")
       done
       shift 2
+      ;;
+    --dirs)
+      if [[ $# -lt 2 ]]; then
+        echo "claude-sandbox: --dirs requires a value" >&2
+        exit 1
+      fi
+      IFS=',' read -ra dirs <<< "$2"
+      for d in "${dirs[@]}"; do
+        if [[ ! -d "$d" ]]; then
+          echo "claude-sandbox: --dirs entry is not a directory: $d" >&2
+          exit 1
+        fi
+        abs_d="$(realpath "$d")"
+        dir_mounts+=(-v "$abs_d:$abs_d:rw")
+        add_dir_flags+=(--add-dir "$abs_d")
+      done
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: claude-sandbox [--ports <list>] [--dirs <list>] [--] [claude args...]
+
+Runs Claude Code inside a sandboxed, privileged rootless podman container
+scoped to the current directory.
+
+Options:
+  --ports <list>  Comma-separated list of ports to publish from the
+                  container to the same port on the host, e.g.
+                  --ports 3000,5173
+  --dirs <list>   Comma-separated list of additional host directories to
+                  bind-mount read-write into the container (at the same
+                  absolute path) and register with claude via --add-dir,
+                  e.g. --dirs /home/user/other-project
+  --              Stop parsing claude-sandbox's own flags; everything
+                  after is passed straight through to the claude CLI
+                  untouched.
+  -h, --help      Show this help and exit.
+
+Anything else is passed straight through to the claude CLI.
+EOF
+      exit 0
       ;;
     *)
       break
@@ -73,6 +120,7 @@ podman run --rm -it \
   "${port_flags[@]}" \
   "${network_flags[@]}" \
   -v /nix/store:/nix/store:ro \
+  "${dir_mounts[@]}" \
   -v "$project_root:$project_root:rw" \
   -w "$PWD" \
   -v "$asdf_data_dir:$asdf_data_dir:ro" \
@@ -85,6 +133,6 @@ podman run --rm -it \
   -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   docker.io/library/debian:stable-slim \
-  "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "$@"
+  "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${add_dir_flags[@]}" "$@"
 code=$?
 exit "$code"

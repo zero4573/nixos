@@ -12,9 +12,14 @@ _: {
   #       claude-sandbox container.  You can provide the additional run
   #       arguemnt `--ports 3000,5173` to mount the claude containers ports
   #       so you can locally connect to applications the sandboxed claude
-  #       brings up if needed.  This will automatically join the registry-proxy
-  #       broker network (see modules/apps/registry-proxy.nix) whenever
-  #       `registry-proxy host-login` has been configured
+  #       brings up if needed. `--dirs /path/one,/path/two` bind-mounts
+  #       additional host directories into the container read-write (at the
+  #       same absolute path) and registers them with claude via --add-dir,
+  #       for tasks that need context from more than one project. `--` stops
+  #       claude-sandbox's own flag parsing so everything after it is passed
+  #       straight through to the claude CLI untouched. This will automatically
+  #       join the registry-proxy broker network (see modules/apps/registry-proxy.nix)
+  #       whenever `registry-proxy host-login` has been configured
   #
   # Script bodies live in sibling .sh files (claude-sandbox.sh,
   # claude-sandbox-nested-podman-setup.sh)
