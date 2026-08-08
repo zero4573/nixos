@@ -147,20 +147,6 @@
       defaultEditor = true;
     };
 
-
-    programs.git = {
-      enable = true;
-      config = {
-        pull.rebase = true;
-        push.autoSetupRemote = true;
-      } // lib.optionalAttrs (cfg.git.userName != "" && cfg.git.userEmail != "") {
-        user = {
-          name = cfg.git.userName;
-          email = cfg.git.userEmail;
-        };
-      };
-    };
-
     # Kill cgroups under memory pressure instead of letting the whole system
     # freeze (e.g. IntelliJ + Docker + browser all running at once) --
     # trade-off: a runaway process (mid-indexing, say) can get killed

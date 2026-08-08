@@ -1,5 +1,5 @@
 { self, ... }: {
-  flake.nixosModules.desktopProfile = { pkgs, config, ... }: {
+  flake.nixosModules.desktopProfile = { pkgs, ... }: {
     imports = [
       self.nixosModules.commonConfigs
       self.nixosModules.audio
@@ -18,6 +18,7 @@
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.joplin
+      self.nixosModules.sublimeMerge
       self.nixosModules.screenshot
       self.nixosModules.zsh
       self.nixosModules.zed
@@ -33,7 +34,6 @@
       "org.libreoffice.LibreOffice"
       "com.calibre_ebook.calibre"
       "com.rtosta.zapzap"
-      "com.sublimemerge.App"
     ];
 
     # Native packages when flatpak packages are failing for whatever reason
@@ -50,9 +50,5 @@
       "erlang"
       "elixir"
     ];
-
-    home-manager.users.${config.hostConfig.user.name}.home.shellAliases = {
-      sublime-merge = "flatpak run com.sublimemerge.App";
-    };
   };
 }

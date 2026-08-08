@@ -5,6 +5,12 @@ _: {
     allowedSignersFile = "${config.home.homeDirectory}/.ssh/allowed_signers";
   in {
     programs.git.enable = true;
+    programs.git.settings.user =
+      lib.optionalAttrs (osConfig.hostConfig.git.userName != "") { name = osConfig.hostConfig.git.userName; }
+      // lib.optionalAttrs (osConfig.hostConfig.git.userEmail != "") { email = osConfig.hostConfig.git.userEmail; };
+
+    programs.git.settings.pull.rebase = true;
+    programs.git.settings.push.autoSetupRemote = true;
 
     programs.git.includes = lib.pipe osConfig.hostConfig.git.identities [
       (map (identity:
