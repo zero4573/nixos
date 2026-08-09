@@ -49,6 +49,7 @@ if command -v registry-proxy >/dev/null 2>&1 && registry-proxy configured; then
   fi
 fi
 
+systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \
 podman run --rm -it \
   --pull=missing \
   "${port_flags[@]}" \

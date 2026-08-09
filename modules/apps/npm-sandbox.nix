@@ -3,7 +3,7 @@ _: {
   let
     npmSandbox = pkgs.writeShellApplication {
       name = "npm-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.asdf-vm pkgs.gawk ];
+      runtimeInputs = [ pkgs.podman pkgs.asdf-vm pkgs.gawk pkgs.systemd ];
       text = builtins.readFile ./npm-sandbox.sh;
     };
   in {

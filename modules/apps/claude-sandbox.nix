@@ -19,7 +19,10 @@ _: {
   #       claude-sandbox's own flag parsing so everything after it is passed
   #       straight through to the claude CLI untouched. This will automatically
   #       join the registry-proxy broker network (see modules/apps/registry-proxy.nix)
-  #       whenever `registry-proxy host-login` has been configured
+  #       whenever `registry-proxy host-login` has been configured. The
+  #       container itself runs under the `ai-sandbox.slice` systemd user
+  #       slice (see modules/apps/ai-sandbox-slice.nix) so it fair-shares
+  #       CPU/IO/memory against the rest of the desktop session under load.
   #
   # Script bodies live in sibling .sh files (claude-sandbox.sh,
   # claude-sandbox-nested-podman-setup.sh)
@@ -48,7 +51,7 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
