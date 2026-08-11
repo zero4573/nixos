@@ -88,7 +88,12 @@ let
       {
         matches = [ { app-id = "teams.microsoft.com"; at-startup = true; } ];
         open-on-workspace = "teams";
-        open-maximized = true;
+        default-column-width = { proportion = 0.5; };
+      }
+      {
+        matches = [ { app-id = "^@joplin/app-desktop$"; at-startup = true; } ];
+        open-on-workspace = "teams";
+        default-column-width = { proportion = 0.5; };
       }
       {
         matches = [ { app-id = "^brave-browser$"; at-startup = true; } ];

@@ -45,6 +45,18 @@
     programs.niri.extraBinds."Super+Shift+T".spawn-sh =
       ''TZ="${config.hostConfig.timezone}" ${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/'';
 
+    systemd.user.services.joplin = {
+      description = "Joplin";
+      wantedBy = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" "teams-pwa.service" ];
+      serviceConfig = {
+        ExecStartPre = "${lib.getExe' pkgs.coreutils "sleep"} 2";
+        ExecStart = "${lib.getExe pkgs.flatpak} run net.cozic.joplin_desktop";
+        Restart = "on-failure";
+      };
+    };
+
     # 1Password SSH agent integration
     #
     # Note: To finish enabling this, you need to enable "Use the SSH agent" in
