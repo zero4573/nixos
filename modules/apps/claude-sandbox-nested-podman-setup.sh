@@ -25,6 +25,7 @@ if [ -n "${REGISTRY_MIRROR_PREFIX:-}" ]; then
 [[registry]]
 prefix = "$REGISTRY_MIRROR_PREFIX"
 location = "$REGISTRY_MIRROR_PREFIX"
+insecure = true
 
 [[registry.mirror]]
 location = "$mirror_location"

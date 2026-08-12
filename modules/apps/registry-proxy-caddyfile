@@ -17,6 +17,23 @@
 # tokens re-evaluating the lockfile
 https://{$ARTIFACTORY_HOST} {
 	tls internal
-	uri strip_prefix {$NPM_STRIP_PREFIX}
-	reverse_proxy npm-proxy:4873
+
+	# Docker registry v2 traffic that misses the registry-cache pull-through
+	# mirror lands here
+	handle /v2/* {
+		reverse_proxy http://registry-cache:5000 {
+			@cachemiss status 404 5xx
+			handle_response @cachemiss {
+				reverse_proxy https://{$ARTIFACTORY_HOST} {
+					header_up Host {$ARTIFACTORY_HOST}
+					header_up Authorization "Basic {$ARTIFACTORY_BASIC_AUTH}"
+				}
+			}
+		}
+	}
+
+	handle {
+		uri strip_prefix {$NPM_STRIP_PREFIX}
+		reverse_proxy npm-proxy:4873
+	}
 }
