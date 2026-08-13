@@ -27,8 +27,16 @@ _: {
     systemd.user.services.noctalia = {
       Unit = {
         Description = "Noctalia shell (bar, notifications, wallpaper)";
-        After = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" "wireplumber.service" ];
         PartOf = [ "graphical-session.target" ];
+        
+        # Noctalia's PipeWire connection (volume control in particular) can
+        # go stale if wireplumber restarts out from under it -- it keeps
+        # animating its own volume slider without the change actually
+        # reaching the real sink, since its cached default-node reference
+        # no longer matches. Bind to wireplumber so a restart there always
+        # gives noctalia a fresh connection instead of a silently stale one.
+        BindsTo = [ "wireplumber.service" ];
       };
       Service = {
         ExecStart = lib.getExe pkgs.noctalia-shell;
