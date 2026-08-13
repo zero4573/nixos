@@ -91,7 +91,7 @@ let
         default-column-width = { proportion = 0.5; };
       }
       {
-        matches = [ { app-id = "^@joplin/app-desktop$"; at-startup = true; } ];
+        matches = [ { app-id = "net.cozic.joplin_desktop"; at-startup = true; } ];
         open-on-workspace = "teams";
         default-column-width = { proportion = 0.5; };
       }
