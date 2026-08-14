@@ -10,13 +10,14 @@ _: {
   };
 
   flake.homeModules.browsers = _: {
-    # Brave as the default browser for http(s)/html.
+    # Default app associations: Brave for http(s)/html, Xournal++ for PDFs.
     xdg.mimeApps = {
       enable = true;
       defaultApplications = {
         "x-scheme-handler/http" = "brave-browser.desktop";
         "x-scheme-handler/https" = "brave-browser.desktop";
         "text/html" = "brave-browser.desktop";
+        "application/pdf" = "com.github.xournalpp.xournalpp.desktop";
       };
     };
   };
