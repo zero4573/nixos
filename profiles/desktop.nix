@@ -19,6 +19,7 @@
       self.nixosModules.containers
       self.nixosModules.joplin
       self.nixosModules.sublimeMerge
+      self.nixosModules.calibre
       self.nixosModules.screenshot
       self.nixosModules.zsh
       self.nixosModules.zed
@@ -32,7 +33,6 @@
       "com.github.tchx84.Flatseal"
       "com.discordapp.Discord"
       "org.libreoffice.LibreOffice"
-      "com.calibre_ebook.calibre"
       "com.rtosta.zapzap"
     ];
 
