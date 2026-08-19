@@ -6,6 +6,7 @@
     imports = [
       self.nixosModules.hostOptions
       self.nixosModules.users
+      self.nixosModules.mouseDebounce
     ];
 
     networking.hostName = cfg.hostName;
