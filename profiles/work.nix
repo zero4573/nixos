@@ -20,6 +20,7 @@
 
     environment.systemPackages = [
       pkgs.awscli2
+      pkgs.cw
     ];
 
     programs.asdf.plugins = [
