@@ -1,5 +1,22 @@
 _: {
-  flake.nixosModules.networking = { pkgs, ... }: {
+  flake.nixosModules.networking = { pkgs, lib, config, ... }:
+  let
+    userName = config.hostConfig.user.name;
+
+    dohPrompt = pkgs.writeShellApplication {
+      name = "doh-network-prompt";
+      runtimeInputs = [ pkgs.libnotify pkgs.networkmanager pkgs.coreutils ];
+      text = builtins.readFile ./doh-network-prompt.sh;
+    };
+
+    dohDispatch = pkgs.writeShellApplication {
+      name = "doh-network-dispatch";
+      runtimeInputs = [ pkgs.networkmanager pkgs.systemd pkgs.coreutils ];
+      text = lib.replaceStrings [ "@nmDoHUser@" ] [ userName ] (
+        builtins.readFile ./doh-network-dispatch.sh
+      );
+    };
+  in {
     networking.networkmanager.enable = true;
 
     networking.networkmanager.plugins = [ pkgs.networkmanager-openvpn ];
@@ -48,5 +65,26 @@ _: {
     # DNSSEC hiccup, and because it has a heuristic for detecting private/VPN
     # zones and skipping validation for those rather than hard-failing them.
     services.resolved.settings.Resolve.DNSSEC = "allow-downgrade";
+
+    # Prompt once per new WiFi/Ethernet network for "force DoH" vs "use this
+    # network's own DNS" (see doh-network-{dispatch,prompt}.sh. Answers
+    # persist in /var/lib/doh-network-choice, keyed by connection UUID, so a
+    # network is only ever asked about once
+    systemd.tmpfiles.rules = [ "d /var/lib/doh-network-choice 0775 root networkmanager -" ];
+
+    networking.networkmanager.dispatcherScripts = [
+      {
+        source = "${dohDispatch}/bin/doh-network-dispatch";
+        type = "basic";
+      }
+    ];
+
+    systemd.user.services."doh-network-prompt@" = {
+      description = "Prompt for DNS-over-HTTPS on network %i";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${dohPrompt}/bin/doh-network-prompt %i";
+      };
+    };
   };
 }
