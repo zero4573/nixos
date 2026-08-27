@@ -30,12 +30,26 @@ let
   in {
     spawn-at-startup = [
       [ (lib.getExe pkgs.jetbrains-toolbox) "--minimize" ]
-      [ (lib.getExe pkgs.brave) "--restore-last-session" ]
       [ (lib.getExe pkgs.flatpak) "run" "com.discordapp.Discord" "--start-minimized" ]
     ];
 
     spawn-sh-at-startup = [
       ''${lib.getExe pkgs.flatpak} run com.rtosta.zapzap --setSettings system/start_background true && ${lib.getExe pkgs.flatpak} run com.rtosta.zapzap''
+
+      # Brave races noctalia on login (both start off graphical-session.target
+      # with no ordering between them). If Brave's notification bridge
+      # initializes before noctalia has claimed org.freedesktop.Notifications
+      # on the session bus, it silently falls back to its own popup-window
+      # notifications for the rest of the session. Wait (briefly, with a
+      # timeout so a broken/disabled noctalia doesn't block Brave forever)
+      # for noctalia to be up before launching.
+      ''
+      for _ in $(seq 1 50); do
+        ${pkgs.systemd}/bin/busctl --user status org.freedesktop.Notifications >/dev/null 2>&1 && break
+        sleep 0.1
+      done
+      exec ${lib.getExe pkgs.brave} --restore-last-session
+      ''
     ];
 
     # For legacy X11 applications

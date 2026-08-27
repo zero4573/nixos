@@ -7,6 +7,10 @@ _: {
     ];
 
     environment.sessionVariables.NIXOS_OZONE_WL = "1";
+
+    environment.etc."brave/policies/managed/notifications.json".text = builtins.toJSON {
+      AllowSystemNotifications = true;
+    };
   };
 
   flake.homeModules.browsers = _: {

@@ -51,7 +51,7 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin

@@ -32,7 +32,7 @@
       description = "Microsoft Teams (PWA)";
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
-      after = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" "noctalia.service" ];
       environment = {
         TZ = "${config.hostConfig.timezone}";
         NIXOS_OZONE_WL = "1";
@@ -45,6 +45,11 @@
 
     programs.niri.extraBinds."Super+Shift+T".spawn-sh =
       ''TZ="${config.hostConfig.timezone}" ${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/'';
+
+    environment.etc."chromium/policies/managed/teams-notifications.json".text = builtins.toJSON {
+      NotificationsAllowedForUrls = [ "https://teams.microsoft.com" ];
+      AllowSystemNotifications = true;
+    };
 
     systemd.user.services.joplin = {
       description = "Joplin";
