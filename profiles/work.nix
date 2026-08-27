@@ -38,6 +38,12 @@
         NIXOS_OZONE_WL = "1";
       };
       serviceConfig = {
+        ExecStartPre = pkgs.writeShellScript "teams-pwa-wait-for-noctalia" ''
+          for _ in $(seq 1 50); do
+            ${pkgs.systemd}/bin/busctl --user status org.freedesktop.Notifications >/dev/null 2>&1 && break
+            sleep 0.1
+          done
+        '';
         ExecStart = "${lib.getExe pkgs.chromium} --app=https://teams.microsoft.com/";
         Restart = "on-failure";
       };
