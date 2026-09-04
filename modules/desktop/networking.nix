@@ -16,6 +16,12 @@ _: {
         builtins.readFile ./doh-network-dispatch.sh
       );
     };
+
+    dohWaitReady = pkgs.writeShellApplication {
+      name = "doh-wait-ready";
+      runtimeInputs = [ pkgs.networkmanager pkgs.dnsutils pkgs.coreutils ];
+      text = builtins.readFile ./doh-wait-ready.sh;
+    };
   in {
     networking.networkmanager.enable = true;
 
@@ -41,7 +47,7 @@ _: {
             "https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md"
             "https://download.dnscrypt.info/resolvers-list/v3/public-resolvers.md"
           ];
-          cache_file = "public-resolvers.md";
+          cache_file = "/var/lib/dnscrypt-proxy/public-resolvers.md";
           minisign_key = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
         };
       };
@@ -76,6 +82,13 @@ _: {
       {
         source = "${dohDispatch}/bin/doh-network-dispatch";
         type = "basic";
+      }
+      {
+        # Blocks activation of DoH-forced connections until dnscrypt-proxy is
+        # actually answering queries, closing the boot-time race where the
+        # connection comes up before its only resolver is ready
+        source = "${dohWaitReady}/bin/doh-wait-ready";
+        type = "pre-up";
       }
     ];
 
