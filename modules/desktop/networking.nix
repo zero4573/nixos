@@ -62,15 +62,15 @@ _: {
     # networking.networkmanager.dns = "systemd-resolved" itself.
     services.resolved.enable = true;
 
-    # DNSSEC-validate lookups ourselves rather than just trusting dnscrypt-proxy's
-    # chosen resolver to have done it. Global DNS= (dnscrypt-proxy, our non-VPN
-    # path) is the only thing bound by this setting.  Per-link DNS servers get 
-    # their own DNSSEC mode, defaulting to unset/inherited, "allow-downgrade" 
-    # is used instead of a strict `true` because a hard failure mode
-    # would take down ALL resolution the moment the upstream resolver has any
-    # DNSSEC hiccup, and because it has a heuristic for detecting private/VPN
-    # zones and skipping validation for those rather than hard-failing them.
-    services.resolved.settings.Resolve.DNSSEC = "allow-downgrade";
+    # Left off deliberately (not "allow-downgrade"): resolved validating
+    # DNSSEC independently roughly doubled per-query latency on a fresh
+    # zone, since it requires additional DNSKEY/DS lookups up the chain of
+    # trust and each of those ALSO pays the full DoH round-trip cost --
+    # measured live, not assumed. dnscrypt-proxy's own require_dnssec = true
+    # still restricts it to resolvers that validate DNSSEC themselves, so
+    # this only drops the *independent local re-check* of that claim, not
+    # DNSSEC validation entirely.
+    services.resolved.settings.Resolve.DNSSEC = false;
 
     # Prompt once per new WiFi/Ethernet network for "force DoH" vs "use this
     # network's own DNS" (see doh-network-{dispatch,prompt}.sh. Answers
