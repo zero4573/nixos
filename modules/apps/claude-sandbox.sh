@@ -170,7 +170,7 @@ podman run --rm -it \
   -e HOME="$HOME" \
   -e ASDF_DATA_DIR="$asdf_data_dir" \
   -e SSL_CERT_FILE="$CACERT_BUNDLE" \
-  -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$claude_out/bin:/usr/bin:/bin" \
+  -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \
   docker.io/library/debian:stable-slim \

@@ -49,12 +49,19 @@ _: {
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
+    # Basic developer tools for use inside the sandbox
+    devToolsEnv = pkgs.buildEnv {
+      name = "claude-sandbox-dev-tools";
+      paths = [ pkgs.git ];
+    };
+
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
       runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
+        export DEV_TOOLS_BIN=${devToolsEnv}/bin
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
         export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
         exec bash ${./claude-sandbox.sh} "$@"
