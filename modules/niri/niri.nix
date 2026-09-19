@@ -65,6 +65,9 @@ let
       click-method = "clickfinger";
     };
 
+    # Disable 3-finger tap
+    clipboard.disable-primary = _: { };
+
     layout.gaps = 5;
     layout.focus-ring = {
       width = 2;
