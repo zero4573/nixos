@@ -9,6 +9,12 @@
       self.nixosModules.mouseDebounce
     ];
 
+    nixpkgs.overlays = [
+      (final: prev: {
+        proton-drive-cli = final.callPackage ../pkgs/proton-drive-cli { };
+      })
+    ];
+
     networking.hostName = cfg.hostName;
 
     # Disable IPv6, as certain apps like intune will fail otherwise
@@ -102,6 +108,8 @@
       # openssl/odbcinst/isql CLIs, for interactive use.
       openssl
       unixodbc
+
+      proton-drive-cli
     ];
 
     # Add build dependencies
