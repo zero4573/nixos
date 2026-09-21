@@ -34,6 +34,8 @@
       "com.discordapp.Discord"
       "org.libreoffice.LibreOffice"
       "com.rtosta.zapzap"
+      "org.gimp.GIMP"
+      "md.obsidian.Obsidian"
     ];
 
     # Native packages when flatpak packages are failing for whatever reason
