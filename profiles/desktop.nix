@@ -3,6 +3,7 @@
     imports = [
       self.nixosModules.commonConfigs
       self.nixosModules.audio
+      self.nixosModules.bluetooth
       self.nixosModules.graphics
       self.nixosModules.fonts
       self.nixosModules.portals
