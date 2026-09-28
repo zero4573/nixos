@@ -42,7 +42,9 @@ _: {
         ExecStart = lib.getExe pkgs.noctalia-shell;
         Restart = "on-failure";
       };
-      Install.WantedBy = [ "graphical-session.target" ];
+      # BindsTo only propagates the stop; being wanted by wireplumber is what
+      # brings noctalia back when wireplumber starts again
+      Install.WantedBy = [ "graphical-session.target" "wireplumber.service" ];
     };
 
     home.activation.noctaliaConfigSeed = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
