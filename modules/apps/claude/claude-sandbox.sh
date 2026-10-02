@@ -247,6 +247,34 @@ echo "claude-sandbox: pod $pod_name" >&2
 # (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
 # an MCP server.
 graphify_mcp_config=""
+
+# Preflight: is there any source file graphify's code-only pass can parse,
+# in the same file set it would scan -- git's view (tracked + untracked,
+# minus ignored) in a git checkout, otherwise a walk that prunes graphify's
+# default skip dirs? No parseable code means no sidecar.
+# Extensions mirror graphify.detect.CODE_EXTENSIONS for the pinned
+# graphifyVersion (minus .json, which on its own isn't worth a graph) --
+# refresh this list when bumping it.
+graphify_code_re='\.(F|F03|F08|F90|F95|asd|astro|bash|c|cbl|cc|cjs|cl|cls|cob|cobol|cpp|cpy|cs|cshtml|csproj|cts|cu|cuh|cxx|dart|dfm|dm|dme|dmf|dmi|dmm|dpk|dpr|ejs|erl|escript|ets|ex|exs|f|f03|f08|f90|f95|fsproj|go|gradle|groovy|h|hcl|hpp|hrl|inc|java|jl|js|jsx|kt|kts|lfm|lisp|lpk|lpr|lsp|lua|luau|m|metal|mjs|ml|mli|mm|mts|pas|php|pp|ps1|psd1|psm1|py|r|rake|razor|rb|resource|robot|rs|scala|sh|sln|slnx|sol|sql|sv|svelte|svh|swift|tf|tfvars|toc|trigger|ts|tsx|v|vb|vbproj|vue|xaml|zig)$'
+has_graphify_sources() {
+  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$project_root" ls-files -z --cached --others --exclude-standard -- . 2>/dev/null
+  else
+    find "$project_root" -mindepth 1 \
+      \( -type d \( -name node_modules -o -name venv -o -name .venv -o -name __pycache__ \
+        -o -name dist -o -name build -o -name target -o -name site-packages -o -name lib64 \
+        -o -name graphify-out -o -name '*.egg-info' -o -name '.*' \) -prune \) \
+      -o -type f -print0 2>/dev/null
+  fi | grep -zqE "$graphify_code_re"
+}
+
+if [[ "$graphify_enabled" == 1 ]]; then
+  if ! has_graphify_sources; then
+    echo "claude-sandbox: no source files graphify can parse here, skipping the graphify sidecar" >&2
+    graphify_enabled=0
+  fi
+fi
+
 if [[ "$graphify_enabled" == 1 ]]; then
   graphify_port=47100
   graphify_key="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
@@ -270,7 +298,7 @@ if [[ "$graphify_enabled" == 1 ]]; then
 
   # First run pip-installs graphify and the first graph build of a large
   # repo can take a while, so wait for the MCP endpoint before starting Claude
-  echo "claude-sandbox: waiting for graphify sidecar (podman logs -f $pod_name-graphify)..." >&2
+  echo "claude-sandbox: starting the graphify sidecar; building the code graph can take a few minutes on a large or first-time project (--no-graphify skips it, podman logs -f $pod_name-graphify follows it)..." >&2
   graphify_ready=0
   for _ in $(seq 1 300); do
     if [[ "$(podman inspect -f '{{.State.Running}}' "$pod_name-graphify" 2>/dev/null)" != true ]]; then
