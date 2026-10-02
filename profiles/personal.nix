@@ -3,9 +3,5 @@
     imports = [
       self.nixosModules.desktopProfile
     ];
-
-    services.flatpak.packages = [
-      "com.valvesoftware.Steam"
-    ];
   };
 }

@@ -37,6 +37,7 @@
       "com.rtosta.zapzap"
       "org.gimp.GIMP"
       "md.obsidian.Obsidian"
+      "com.valvesoftware.Steam"
     ];
 
     # Native packages when flatpak packages are failing for whatever reason
