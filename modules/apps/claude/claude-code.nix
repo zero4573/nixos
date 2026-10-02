@@ -56,7 +56,7 @@ _: {
     settingsFile = pkgs.writeText "claude-code-settings.json" (builtins.toJSON settings);
 
     # Locally-authored skills: one subdirectory per skill under ./skills,
-    # each holding a SKILL.md (see modules/apps/skills/README.md). Copied
+    # each holding a SKILL.md (see modules/apps/claude/skills/README.md). Copied
     # wholesale into ~/.claude/skills/.
     skillsSource = ./skills;
 
@@ -76,6 +76,54 @@ _: {
     # requires an exact commit to fetch reproducibly. Bump `rev` by hand to
     # pull in newer content from a source.
     skillSources = [ ];
+
+    # graphify's Claude Code skill (SKILL.md + its references/ sidecar), from
+    # the latest GitHub release. "Latest" can't be resolved in pure eval, so
+    # this runs at activation: it resolves the release tag on every switch,
+    # downloads only when the tag changed, and caches the result so an
+    # offline switch reinstalls the last fetched version instead of dropping
+    # the skill.
+    graphifySkillScript = pkgs.writeShellScript "claude-code-graphify-skill" ''
+      set -euo pipefail
+      export PATH=${lib.makeBinPath [ pkgs.curl pkgs.gnutar pkgs.gzip pkgs.coreutils ]}
+      repo="Graphify-Labs/graphify"
+      cache="''${XDG_CACHE_HOME:-$HOME/.cache}/claude-code/graphify-skill"
+      dest="$HOME/.claude/skills/graphify"
+
+      latest_url="$(curl -fsSL --max-time 20 -o /dev/null -w '%{url_effective}' \
+        "https://github.com/$repo/releases/latest" || true)"
+      tag="''${latest_url##*/tag/}"
+      if [[ "$latest_url" == */tag/* && "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        if [[ "$(cat "$cache/.tag" 2>/dev/null || true)" != "$tag" ]]; then
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          if curl -fsSL --max-time 120 "https://codeload.github.com/$repo/tar.gz/refs/tags/$tag" \
+              | tar -xz -C "$tmp" --strip-components=1 --wildcards \
+                  '*/graphify/skill.md' '*/graphify/skills/claude/references/*' \
+              && [[ -s "$tmp/graphify/skill.md" ]]; then
+            mkdir -p "$tmp/out"
+            cp "$tmp/graphify/skill.md" "$tmp/out/SKILL.md"
+            cp -r "$tmp/graphify/skills/claude/references" "$tmp/out/references"
+            echo "$tag" > "$tmp/out/.tag"
+            mkdir -p "$(dirname "$cache")"
+            rm -rf "$cache"
+            mv "$tmp/out" "$cache"
+            echo "graphify skill: installed $tag"
+          else
+            echo "graphify skill: failed to download $tag, keeping cached copy" >&2
+          fi
+        fi
+      else
+        echo "graphify skill: couldn't resolve the latest release, keeping cached copy" >&2
+      fi
+
+      if [[ -f "$cache/SKILL.md" ]]; then
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        cp -r "$cache/SKILL.md" "$cache/references" "$dest/"
+        chmod -R u+rwX "$dest"
+      fi
+    '';
 
     # For each configured source: fetch it, then either copy everything
     # under `path` (only == null) or just the named subdirectories.
@@ -110,6 +158,11 @@ _: {
       run cp -r ${skillsSource}/. "$HOME/.claude/skills/"
       ${skillCopyCommands}
       run chmod -R u+rwX "$HOME/.claude/skills"
+    '';
+
+    # Must run after claudeCodeSkills, which wipes ~/.claude/skills
+    home.activation.claudeCodeGraphifySkill = lib.hm.dag.entryAfter [ "claudeCodeSkills" ] ''
+      run ${graphifySkillScript}
     '';
   };
 }

@@ -18,14 +18,24 @@ _: {
   #       for tasks that need context from more than one project. `--` stops
   #       claude-sandbox's own flag parsing so everything after it is passed
   #       straight through to the claude CLI untouched. This will automatically
-  #       join the registry-proxy broker network (see modules/apps/registry-proxy.nix)
-  #       whenever `registry-proxy host-login` has been configured. The
+  #       join the registry-proxy broker network (see modules/apps/registry-proxy/registry-proxy.nix)
+  #       whenever `registry-proxy host-login` has been configured.
+  #       Claude runs in a podman pod next to a graphify sidecar
+  #       (claude-sandbox-graphify-sidecar.sh) that builds a code knowledge
+  #       graph of the project (local tree-sitter AST, no LLM), keeps it
+  #       updated, and serves it to Claude as the `graphify` MCP server on the
+  #       pod's localhost. It also exports the graph as Obsidian notes into
+  #       ~/Documents/Obsidian/<vault>/graphify/<git repo name>/; the vault
+  #       is prompted for on a project's first run and remembered per
+  #       project in ~/.local/state/claude-sandbox/graphify-vaults.tsv
+  #       (`--vault <name|none>` changes it, `--no-graphify` skips the
+  #       sidecar for one session). The
   #       container itself runs under the `ai-sandbox.slice` systemd user
   #       slice (see modules/apps/ai-sandbox-slice.nix) so it fair-shares
   #       CPU/IO/memory against the rest of the desktop session under load.
   #
   # Script bodies live in sibling .sh files (claude-sandbox.sh,
-  # claude-sandbox-nested-podman-setup.sh)
+  # claude-sandbox-nested-podman-setup.sh, claude-sandbox-graphify-sidecar.sh)
   flake.homeModules.claudeSandbox = { pkgs, lib, ... }:
   let
     # Toolchain for the NESTED podman running inside the sandbox container.
@@ -46,6 +56,11 @@ _: {
       ];
     };
 
+    # Pinned graphifyy release the graphify sidecar pip-installs into the
+    # shared `claude-sandbox-graphify` podman volume (graphifyy isn't in
+    # nixpkgs). Bumping this reinstalls on the next sandbox start.
+    graphifyVersion = "0.9.73";
+
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
@@ -57,12 +72,14 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.git pkgs.gawk pkgs.coreutils ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
         export DEV_TOOLS_BIN=${devToolsEnv}/bin
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
+        export GRAPHIFY_SIDECAR=${./claude-sandbox-graphify-sidecar.sh}
+        export GRAPHIFY_VERSION=${graphifyVersion}
         export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
         exec bash ${./claude-sandbox.sh} "$@"
       '';

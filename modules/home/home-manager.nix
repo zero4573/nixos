@@ -19,6 +19,7 @@
         imports = [
           self.homeModules.desktopHome
           self.homeModules.noctalia
+          self.homeModules.obsidian
           self.homeModules.vicinaeConfig
           self.homeModules.terminals
           self.homeModules.browsers

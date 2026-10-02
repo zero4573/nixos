@@ -21,14 +21,20 @@ options.nix                     flake.nixosModules.hostOptions — the hostConfi
 hosts/common.nix                commonConfigs — reads hostConfig.* (stateVersion, timezone, git, ...)
 hosts/<host>/{default,settings,disko}.nix   per-host nixosConfigurations + hostConfig values
 profiles/{desktop,work,personal,vm-guest}.nix   composition layer over modules/
-modules/desktop/{audio,fonts,portals,networking}.nix
-modules/apps/{browsers,terminals,dev,containers,screenshot,onepassword,work-autostart}.nix
-modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,work-flatpaks}.nix
+modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
+modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
+modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, obsidian, ...)
+modules/apps/claude/            claude-code (settings, hooks, skills/), claude-sandbox (+ sidecar/setup scripts)
+modules/apps/npm-sandbox/       npm-sandbox.nix + its script
+modules/apps/registry-proxy/    registry-proxy.nix + script + caddyfile (shared by claude/npm sandboxes)
+modules/apps/{zed,zsh}/         app module + its config files
+modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,intune}.nix
 modules/flatpak/flatpak.nix
 modules/hardware/framework.nix
-modules/home/{home-manager,desktop-home,users}.nix
+modules/hardware/mouse-debounce/   mouse-debounce.nix + Go daemon source in src/
+modules/home/{home-manager,desktop-home,users,nodatacow}.nix
 modules/niri/niri.nix           niri wrapper package + keybinds (host-agnostic)
-modules/noctalia/, modules/thunar/
+modules/noctalia/, modules/thunar/, modules/vicinae/
 ```
 
 Hosts:
@@ -41,6 +47,13 @@ Hosts:
 - **Every new file under `modules/`, `profiles/`, or `hosts/` must be a flake-parts
   module**: `{ self, inputs, ... }: { flake.nixosModules.<name> = { ... }: { ... }; }`.
   Use `_:` for the outer function head if `self`/`inputs` are unused.
+- An app/feature that spans more than one file (scripts, config files, source,
+  multiple related modules) gets its own directory named after it, with its
+  module(s) and every supporting file co-located, e.g. `modules/apps/claude/`.
+  Single-file modules stay flat. Supporting files are referenced by sibling
+  relative path (`./foo.sh`); components shared by several apps (e.g.
+  `registry-proxy`, `ai-sandbox-slice.nix`) stay in their own place rather
+  than under one consumer.
 - Reference other modules via `self.nixosModules.<name>` / `self.homeModules.<name>`,
   never by filesystem path — the flake namespace is the contract, not the directory.
 - Per-host values (user, timezone, git identity, profile) go through `hostConfig.*`

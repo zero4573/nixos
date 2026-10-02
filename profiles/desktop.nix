@@ -19,6 +19,7 @@
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.joplin
+      self.nixosModules.obsidian
       self.nixosModules.sublimeMerge
       self.nixosModules.calibre
       self.nixosModules.screenshot
@@ -36,9 +37,11 @@
       "org.libreoffice.LibreOffice"
       "com.rtosta.zapzap"
       "org.gimp.GIMP"
-      "md.obsidian.Obsidian"
       "com.valvesoftware.Steam"
     ];
+
+    # udev rules for Steam controllers etc. (flatpak Steam can't ship these)
+    hardware.steam-hardware.enable = true;
 
     # Native packages when flatpak packages are failing for whatever reason
     environment.systemPackages = [
