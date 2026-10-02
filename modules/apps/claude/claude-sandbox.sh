@@ -189,10 +189,59 @@ fi
 # namespace, so the sidecar's MCP endpoint is reachable on Claude's
 # localhost without being published anywhere else. Ports/networks that used
 # to sit on the claude container live on the pod now.
-pod_name="claude-sandbox-$$"
-podman pod create --name "$pod_name" \
-  "${port_flags[@]}" \
-  "${network_flags[@]}" >/dev/null
+#
+# Everything is named after the git repo (origin's URL, else the first
+# remote) plus the checkout folder, e.g. claude-sandbox-ships-service-db4005a08
+# for a clone/worktree in ./db4005a08, or just the folder when it matches the
+# repo name or there's no remote. A -2, -3, ... suffix keeps concurrent
+# sessions in the same checkout apart. Labels make them filterable:
+#   podman ps --filter label=claude-sandbox.repo=<repo>
+sanitize_name() {
+  tr '[:upper:]' '[:lower:]' <<< "$1" | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[-_.]+//; s/[-_.]+$//'
+}
+remote_url="$(git -C "$project_root" remote get-url origin 2>/dev/null || true)"
+if [[ -z "$remote_url" ]]; then
+  first_remote="$(git -C "$project_root" remote 2>/dev/null | head -n1 || true)"
+  [[ -n "$first_remote" ]] && remote_url="$(git -C "$project_root" remote get-url "$first_remote" 2>/dev/null || true)"
+fi
+repo_name="${remote_url%/}"
+repo_name="${repo_name%.git}"
+repo_name="$(sanitize_name "${repo_name##*[/:]}")"
+folder_name="$(sanitize_name "$(basename "$project_root")")"
+if [[ -n "$repo_name" && "$repo_name" != "$folder_name" ]]; then
+  name_base="$repo_name-$folder_name"
+else
+  name_base="${folder_name:-project}"
+fi
+# The pod name doubles as its hostname, which is capped at 63 characters
+# (leaving room for a -N suffix)
+name_base="claude-sandbox-$name_base"
+name_base="${name_base:0:58}"
+name_base="${name_base%[-_.]}"
+
+name_labels=(
+  --label "claude-sandbox.project=$project_root"
+  --label "claude-sandbox.repo=${repo_name:-}"
+)
+pod_name=""
+n=1
+while [[ -z "$pod_name" ]]; do
+  candidate="$name_base"
+  [[ "$n" -gt 1 ]] && candidate="$name_base-$n"
+  n=$((n + 1))
+  podman pod exists "$candidate" && continue
+  if create_err="$(podman pod create --name "$candidate" --infra-name "$candidate-infra" \
+      "${name_labels[@]}" \
+      "${port_flags[@]}" \
+      "${network_flags[@]}" 2>&1 >/dev/null)"; then
+    pod_name="$candidate"
+  elif ! grep -qi "already" <<< "$create_err"; then
+    # Not a name clash but a real failure (e.g. a --ports conflict)
+    echo "claude-sandbox: couldn't create pod $candidate: $create_err" >&2
+    exit 1
+  fi
+done
+echo "claude-sandbox: pod $pod_name" >&2
 
 # graphify sidecar: builds a code graph of the project into ./graphify-out
 # (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
@@ -205,6 +254,8 @@ if [[ "$graphify_enabled" == 1 ]]; then
   podman run -d \
     --name "$pod_name-graphify" \
     --pod "$pod_name" \
+    "${name_labels[@]}" \
+    --label claude-sandbox.role=graphify \
     --pull=missing \
     -v claude-sandbox-graphify:/opt/graphify \
     -v "$GRAPHIFY_SIDECAR:/sidecar.sh:ro" \
@@ -256,7 +307,10 @@ fi
 
 systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \
 podman run --rm -it \
+  --name "$pod_name-claude" \
   --pod "$pod_name" \
+  "${name_labels[@]}" \
+  --label claude-sandbox.role=claude \
   --privileged \
   --pull=missing \
   -v /nix/store:/nix/store:ro \

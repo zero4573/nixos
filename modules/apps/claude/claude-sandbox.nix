@@ -30,6 +30,10 @@ _: {
   #       `sandbox-mcp` whenever MCP servers were added with
   #       `sandbox-proxy mcp add` (e.g. Jira/Bitbucket via Atlassian Rovo),
   #       which are then registered with claude without their tokens.
+  #       The pod and its containers are named after the git repo + checkout
+  #       folder (claude-sandbox-<repo>-<folder>[-N], with -claude/-graphify
+  #       container suffixes) and labelled claude-sandbox.{repo,project,role},
+  #       e.g. `podman ps --filter label=claude-sandbox.repo=<repo>`.
   #       Claude runs in a podman pod next to a graphify sidecar
   #       (claude-sandbox-graphify-sidecar.sh) that builds a code knowledge
   #       graph of the project (local tree-sitter AST, no LLM), keeps it
@@ -92,7 +96,7 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq pkgs.git pkgs.gnused ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
