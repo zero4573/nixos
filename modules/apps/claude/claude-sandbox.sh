@@ -118,25 +118,43 @@ network_flags=()
 registry_env_flags=()
 mounts=()
 tmp_dir="$(mktemp -d)"
-if command -v registry-proxy >/dev/null 2>&1 && registry-proxy configured; then
-  registry-proxy start
+# sandbox-proxy (modules/apps/sandbox-proxy) holds the real credentials on
+# the host; the sandbox only gets credential-free URLs on its networks
+proxy_registry=0
+proxy_mcp=0
+if command -v sandbox-proxy >/dev/null 2>&1; then
+  sandbox-proxy configured && proxy_registry=1
+  sandbox-proxy mcp-configured && proxy_mcp=1
+  if [[ "$proxy_registry" == 1 || "$proxy_mcp" == 1 ]]; then
+    sandbox-proxy start
+  fi
+fi
 
+# MCP servers (e.g. Jira/Bitbucket via Atlassian Rovo), reached through
+# mcp-proxy on the sandbox-mcp network, which injects the auth headers
+proxy_mcp_config=""
+if [[ "$proxy_mcp" == 1 ]]; then
+  network_flags+=(--network sandbox-mcp)
+  proxy_mcp_config="$(sandbox-proxy sandbox-mcp-config)"
+fi
+
+if [[ "$proxy_registry" == 1 ]]; then
   network_flags+=(--network sandbox-registry)
 
-  if npmrc_line="$(registry-proxy sandbox-npmrc 2>/dev/null)"; then
+  if npmrc_line="$(sandbox-proxy sandbox-npmrc 2>/dev/null)"; then
     echo "$npmrc_line" > "$tmp_dir/.npmrc"
     mounts+=(-v "$tmp_dir/.npmrc:$HOME/.npmrc:ro")
   fi
 
-  if goproxy_url="$(registry-proxy sandbox-goproxy 2>/dev/null)"; then
+  if goproxy_url="$(sandbox-proxy sandbox-goproxy 2>/dev/null)"; then
     registry_env_flags+=(-e "GOPROXY=$goproxy_url")
   fi
 
-  if docker_prefix="$(registry-proxy sandbox-docker-prefix 2>/dev/null)"; then
+  if docker_prefix="$(sandbox-proxy sandbox-docker-prefix 2>/dev/null)"; then
     registry_env_flags+=(-e "REGISTRY_MIRROR_PREFIX=$docker_prefix")
   fi
 
-  if extra_host="$(registry-proxy sandbox-extra-host 2>/dev/null)"; then
+  if extra_host="$(sandbox-proxy sandbox-extra-host 2>/dev/null)"; then
     network_flags+=(--add-host "$extra_host")
   fi
 fi
@@ -186,7 +204,7 @@ podman pod create --name "$pod_name" \
 # exports it as Obsidian notes into <vault>/graphify/<repo>. The vault
 # choice is stored per project on the host (outside every container mount),
 # so the sandboxed Claude can't redirect it.
-mcp_flags=()
+graphify_mcp_config=""
 if [[ "$graphify_enabled" == 1 ]]; then
   obsidian_root="$HOME/Documents/Obsidian"
   state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude-sandbox"
@@ -293,16 +311,23 @@ if [[ "$graphify_enabled" == 1 ]]; then
   done
 
   if [[ "$graphify_ready" == 1 ]]; then
-    cat > "$tmp_dir/graphify-mcp.json" <<JSON
-{"mcpServers":{"graphify":{"type":"http","url":"http://127.0.0.1:$graphify_port/mcp","headers":{"Authorization":"Bearer $graphify_key"}}}}
-JSON
-    mounts+=(-v "$tmp_dir/graphify-mcp.json:$tmp_dir/graphify-mcp.json:ro")
-    mcp_flags+=(--mcp-config "$tmp_dir/graphify-mcp.json")
+    graphify_mcp_config="{\"mcpServers\":{\"graphify\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:$graphify_port/mcp\",\"headers\":{\"Authorization\":\"Bearer $graphify_key\"}}}}"
   else
     echo "claude-sandbox: graphify sidecar didn't come up, continuing without it:" >&2
     podman logs --tail 20 "$pod_name-graphify" >&2 2>&1 || true
     podman rm -f -t 0 "$pod_name-graphify" >/dev/null 2>&1 || true
   fi
+fi
+
+# All MCP servers go into one file passed as --mcp-config=<file>: the flag
+# is variadic, so a separate value would swallow a following positional
+# prompt as another config file
+mcp_flags=()
+if [[ -n "$proxy_mcp_config$graphify_mcp_config" ]]; then
+  printf '%s\n' "$proxy_mcp_config" "$graphify_mcp_config" \
+    | jq -s '{mcpServers: (map(select(. != null) | .mcpServers) | add)}' > "$tmp_dir/mcp.json"
+  mounts+=(-v "$tmp_dir/mcp.json:$tmp_dir/mcp.json:ro")
+  mcp_flags+=("--mcp-config=$tmp_dir/mcp.json")
 fi
 
 systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \

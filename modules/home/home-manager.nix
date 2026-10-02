@@ -32,7 +32,7 @@
           self.homeModules.claudeCode
           self.homeModules.claudeSandbox
           self.homeModules.npmSandbox
-          self.homeModules.registryProxy
+          self.homeModules.sandboxProxy
           self.homeModules.aiSandboxSlice
         ];
       };

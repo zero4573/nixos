@@ -34,17 +34,17 @@ node_version="$(awk '{print $2}' <<< "$current_line")"
 mounts=(-v "$project_root:$project_root:rw")
 network_flags=()
 tmp_dir=""
-if command -v registry-proxy >/dev/null 2>&1 && registry-proxy configured; then
-  registry-proxy start
+if command -v sandbox-proxy >/dev/null 2>&1 && sandbox-proxy configured; then
+  sandbox-proxy start registry
 
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  registry-proxy sandbox-npmrc > "$tmp_dir/.npmrc"
+  sandbox-proxy sandbox-npmrc > "$tmp_dir/.npmrc"
 
   network_flags+=(--network sandbox-registry)
   mounts+=(-v "$tmp_dir/.npmrc:$HOME/.npmrc:ro")
 
-  if extra_host="$(registry-proxy sandbox-extra-host 2>/dev/null)"; then
+  if extra_host="$(sandbox-proxy sandbox-extra-host 2>/dev/null)"; then
     network_flags+=(--add-host "$extra_host")
   fi
 fi

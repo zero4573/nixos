@@ -18,8 +18,12 @@ _: {
   #       for tasks that need context from more than one project. `--` stops
   #       claude-sandbox's own flag parsing so everything after it is passed
   #       straight through to the claude CLI untouched. This will automatically
-  #       join the registry-proxy broker network (see modules/apps/registry-proxy/registry-proxy.nix)
-  #       whenever `registry-proxy host-login` has been configured.
+  #       join the sandbox-proxy credential broker networks (see
+  #       modules/apps/sandbox-proxy/sandbox-proxy.nix): `sandbox-registry`
+  #       whenever `sandbox-proxy host-login` has been configured, and
+  #       `sandbox-mcp` whenever MCP servers were added with
+  #       `sandbox-proxy mcp add` (e.g. Jira/Bitbucket via Atlassian Rovo),
+  #       which are then registered with claude without their tokens.
   #       Claude runs in a podman pod next to a graphify sidecar
   #       (claude-sandbox-graphify-sidecar.sh) that builds a code knowledge
   #       graph of the project (local tree-sitter AST, no LLM), keeps it
@@ -72,7 +76,7 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.git pkgs.gawk pkgs.coreutils ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.git pkgs.gawk pkgs.coreutils pkgs.jq ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin

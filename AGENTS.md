@@ -26,7 +26,7 @@ modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait script
 modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, obsidian, ...)
 modules/apps/claude/            claude-code (settings, hooks, skills/), claude-sandbox (+ sidecar/setup scripts)
 modules/apps/npm-sandbox/       npm-sandbox.nix + its script
-modules/apps/registry-proxy/    registry-proxy.nix + script + caddyfile (shared by claude/npm sandboxes)
+modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy
 modules/apps/{zed,zsh}/         app module + its config files
 modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,intune}.nix
 modules/flatpak/flatpak.nix
@@ -52,7 +52,7 @@ Hosts:
   module(s) and every supporting file co-located, e.g. `modules/apps/claude/`.
   Single-file modules stay flat. Supporting files are referenced by sibling
   relative path (`./foo.sh`); components shared by several apps (e.g.
-  `registry-proxy`, `ai-sandbox-slice.nix`) stay in their own place rather
+  `sandbox-proxy`, `ai-sandbox-slice.nix`) stay in their own place rather
   than under one consumer.
 - Reference other modules via `self.nixosModules.<name>` / `self.homeModules.<name>`,
   never by filesystem path — the flake namespace is the contract, not the directory.
