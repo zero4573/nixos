@@ -181,13 +181,15 @@
           {
             "displayMode": "onhover",
             "iconColor": "none",
-            "id": "Volume",
-            "middleClickCommand": "pwvucontrol || pavucontrol",
+            "id": "Bluetooth",
             "textColor": "none"
           },
           {
+            "displayMode": "onhover",
             "iconColor": "none",
-            "id": "NoctaliaPerformance"
+            "id": "Volume",
+            "middleClickCommand": "pwvucontrol || pavucontrol",
+            "textColor": "none"
           },
           {
             "clockColor": "none",
