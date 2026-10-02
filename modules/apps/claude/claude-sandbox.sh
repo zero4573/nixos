@@ -2,7 +2,6 @@ port_flags=()
 dir_mounts=()
 add_dir_flags=()
 graphify_enabled=1
-vault_arg=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ports)
@@ -37,14 +36,6 @@ while [[ $# -gt 0 ]]; do
       done
       shift 2
       ;;
-    --vault)
-      if [[ $# -lt 2 ]]; then
-        echo "claude-sandbox: --vault requires a value" >&2
-        exit 1
-      fi
-      vault_arg="$2"
-      shift 2
-      ;;
     --no-graphify)
       graphify_enabled=0
       shift
@@ -55,8 +46,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: claude-sandbox [--ports <list>] [--dirs <list>] [--vault <name>]
-                      [--no-graphify] [--] [claude args...]
+Usage: claude-sandbox [--ports <list>] [--dirs <list>] [--no-graphify]
+                      [--] [claude args...]
 
 Runs Claude Code inside a sandboxed, privileged rootless podman container
 scoped to the current directory.
@@ -69,16 +60,16 @@ Options:
                   bind-mount read-write into the container (at the same
                   absolute path) and register with claude via --add-dir,
                   e.g. --dirs /home/user/other-project
-  --vault <name>  Obsidian vault under ~/Documents/Obsidian that the
-                  graphify sidecar exports this project's graph into
-                  (<vault>/graphify/<repo>). Remembered per project;
-                  `none` disables the export. Without this flag the saved
-                  choice is used, or you're prompted on first run.
-  --no-graphify   Don't start the graphify sidecar for this session.
+  --no-graphify   Don't start the graphify sidecar (code graph MCP server,
+                  kept in ./graphify-out) for this session.
   --              Stop parsing claude-sandbox's own flags; everything
                   after is passed straight through to the claude CLI
                   untouched.
   -h, --help      Show this help and exit.
+
+If the current directory is a git checkout, it is fetched and fast-forwarded
+to its upstream before launch; diverged branches or local changes in the
+way are reported and left alone.
 
 Anything else is passed straight through to the claude CLI.
 EOF
@@ -91,6 +82,10 @@ EOF
 done
 
 project_root="$PWD"
+
+# Fast-forward a git checkout to its upstream before anything else, so the
+# graphify sidecar's startup build and watch begin on the updated tree
+"$CLAUDE_GIT_UPDATE" "$project_root"
 asdf_data_dir="$HOME/.asdf"
 
 # Consolidated exit cleanup
@@ -199,80 +194,11 @@ podman pod create --name "$pod_name" \
   "${port_flags[@]}" \
   "${network_flags[@]}" >/dev/null
 
-# graphify sidecar: builds a code graph of the project (local tree-sitter,
-# no LLM), keeps it current, serves it to Claude as an MCP server, and
-# exports it as Obsidian notes into <vault>/graphify/<repo>. The vault
-# choice is stored per project on the host (outside every container mount),
-# so the sandboxed Claude can't redirect it.
+# graphify sidecar: builds a code graph of the project into ./graphify-out
+# (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
+# an MCP server.
 graphify_mcp_config=""
 if [[ "$graphify_enabled" == 1 ]]; then
-  obsidian_root="$HOME/Documents/Obsidian"
-  state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude-sandbox"
-  vault_file="$state_dir/graphify-vaults.tsv"
-  mkdir -p "$state_dir"
-  touch "$vault_file"
-
-  valid_vault() {
-    [[ "$1" == none ]] || { [[ "$1" != */* && "$1" != .* && -d "$obsidian_root/$1" ]]; }
-  }
-
-  save_vault() {
-    awk -F'\t' -v p="$project_root" '$1 != p' "$vault_file" > "$vault_file.tmp"
-    printf '%s\t%s\n' "$project_root" "$1" >> "$vault_file.tmp"
-    mv "$vault_file.tmp" "$vault_file"
-  }
-
-  vault=""
-  if [[ -n "$vault_arg" ]]; then
-    if ! valid_vault "$vault_arg"; then
-      echo "claude-sandbox: --vault must be \`none\` or a vault directory under $obsidian_root: $vault_arg" >&2
-      exit 1
-    fi
-    vault="$vault_arg"
-    save_vault "$vault"
-  else
-    saved="$(awk -F'\t' -v p="$project_root" '$1 == p { v = $2 } END { print v }' "$vault_file")"
-    if [[ -n "$saved" ]] && valid_vault "$saved"; then
-      vault="$saved"
-    elif [[ -t 0 ]]; then
-      vaults=()
-      for d in "$obsidian_root"/*/; do
-        [[ -d "$d" ]] && vaults+=("$(basename "$d")")
-      done
-      echo "claude-sandbox: pick an Obsidian vault for this project's graphify export:" >&2
-      PS3="vault> "
-      select choice in "${vaults[@]}" none; do
-        [[ -n "$choice" ]] && break
-      done
-      vault="${choice:-none}"
-      save_vault "$vault"
-    else
-      vault="none"
-    fi
-  fi
-
-  # Export folder is named after the git repo (origin's URL, else the first
-  # remote), not the checkout directory
-  vault_mounts=()
-  vault_env_flags=()
-  if [[ "$vault" != none ]]; then
-    remote_url="$(git -C "$project_root" remote get-url origin 2>/dev/null \
-      || git -C "$project_root" remote get-url "$(git -C "$project_root" remote 2>/dev/null | head -n1)" 2>/dev/null \
-      || true)"
-    repo_name="${remote_url%/}"
-    repo_name="${repo_name%.git}"
-    repo_name="${repo_name##*[/:]}"
-    if [[ "$repo_name" =~ ^[A-Za-z0-9._-]+$ && "$repo_name" != .* ]]; then
-      vault_export_dir="$obsidian_root/$vault/graphify/$repo_name"
-      mkdir -p "$vault_export_dir"
-      vault_mounts+=(-v "$vault_export_dir:$vault_export_dir:rw")
-      vault_env_flags+=(-e "VAULT_EXPORT_DIR=$vault_export_dir")
-      echo "claude-sandbox: graphify exporting to $vault_export_dir" >&2
-    else
-      echo "claude-sandbox: no git remote to name the graphify export after, skipping the Obsidian export" >&2
-    fi
-  fi
-
   graphify_port=47100
   graphify_key="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
   systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \
@@ -283,13 +209,11 @@ if [[ "$graphify_enabled" == 1 ]]; then
     -v claude-sandbox-graphify:/opt/graphify \
     -v "$GRAPHIFY_SIDECAR:/sidecar.sh:ro" \
     -v "$project_root:$project_root:rw" \
-    "${vault_mounts[@]}" \
     -e GRAPHIFY_VERSION="$GRAPHIFY_VERSION" \
     -e GRAPHIFY_PORT="$graphify_port" \
     -e GRAPHIFY_API_KEY="$graphify_key" \
     -e PROJECT_ROOT="$project_root" \
     -e GRAPHIFY_QUERY_LOG_DISABLE=1 \
-    "${vault_env_flags[@]}" \
     docker.io/library/python:3.12-slim \
     sh /sidecar.sh >/dev/null
 
@@ -347,6 +271,9 @@ podman run --rm -it \
   -e HOME="$HOME" \
   -e ASDF_DATA_DIR="$asdf_data_dir" \
   -e SSL_CERT_FILE="$CACERT_BUNDLE" \
+  -e GIT_CONFIG_COUNT=1 \
+  -e GIT_CONFIG_KEY_0=core.excludesFile \
+  -e GIT_CONFIG_VALUE_0="$GIT_GLOBAL_IGNORE" \
   -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \

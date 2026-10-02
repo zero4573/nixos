@@ -9,6 +9,15 @@ _: {
       lib.optionalAttrs (osConfig.hostConfig.git.userName != "") { name = osConfig.hostConfig.git.userName; }
       // lib.optionalAttrs (osConfig.hostConfig.git.userEmail != "") { email = osConfig.hostConfig.git.userEmail; };
 
+    # Global excludes (~/.config/git/ignore). claude-sandbox applies this
+    # same file inside its container via core.excludesFile, since ~/.config
+    # isn't mounted there.
+    programs.git.ignores = [
+      "**/.claude/settings.local.json"
+      # graphify's code graph, built by claude-sandbox's sidecar
+      "graphify-out/"
+    ];
+
     programs.git.settings.pull.rebase = true;
     programs.git.settings.push.autoSetupRemote = true;
 

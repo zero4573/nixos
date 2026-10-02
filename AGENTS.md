@@ -12,6 +12,8 @@ plain NixOS module. Fine-grained modules expose `flake.nixosModules.<name>`; coa
 top-down `configuration.nix` — everything is assembled from `self.nixosModules.*`.
 
 For the in-progress multi-host buildout plan and decisions log, see `plan.md`.
+For everything that must be updated by hand (pins, overrides, container
+images, flatpaks — anything `nix flake update` doesn't move), see `UPDATES.md`.
 
 ## Directory layout
 
@@ -23,11 +25,12 @@ hosts/<host>/{default,settings,disko}.nix   per-host nixosConfigurations + hostC
 profiles/{desktop,work,personal,vm-guest}.nix   composition layer over modules/
 modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
 modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
-modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, obsidian, ...)
+modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, ...)
 modules/apps/claude/            claude-code (settings, hooks, skills/), claude-sandbox (+ sidecar/setup scripts)
 modules/apps/npm-sandbox/       npm-sandbox.nix + its script
 modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy
 modules/apps/{zed,zsh}/         app module + its config files
+modules/apps/obsidian/          flatpak + per-vault Tasks plugin/settings and Minimal theme
 modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,intune}.nix
 modules/flatpak/flatpak.nix
 modules/hardware/framework.nix
@@ -54,6 +57,11 @@ Hosts:
   relative path (`./foo.sh`); components shared by several apps (e.g.
   `sandbox-proxy`, `ai-sandbox-slice.nix`) stay in their own place rather
   than under one consumer.
+- Anything pinned or fetched outside `flake.lock` (a `fetchurl`/`fetchFromGitHub`
+  with a hash, a version override in an overlay, a container image tag, a
+  flatpak, a pip/npm version, a runtime download) must get a row in
+  `UPDATES.md` saying where it lives and how to bump it — and the row is
+  removed when the pin goes away.
 - Reference other modules via `self.nixosModules.<name>` / `self.homeModules.<name>`,
   never by filesystem path — the flake namespace is the contract, not the directory.
 - Per-host values (user, timezone, git identity, profile) go through `hostConfig.*`

@@ -12,6 +12,39 @@
     nixpkgs.overlays = [
       (final: prev: {
         proton-drive-cli = final.callPackage ../pkgs/proton-drive-cli { };
+
+        # Upstream asdf-vm 0.20.1 git tag was deleted after the fact
+        # (nixpkgs still points at it), so the fixed-output source fetch
+        # 404s. Pin to 0.20.2 until nixpkgs catches up; vendorHash is
+        # unchanged from 0.20.1 (go.mod/go.sum didn't move between patches).
+        asdf-vm = prev.asdf-vm.overrideAttrs (old: {
+          version = "0.20.2";
+          src = final.fetchFromGitHub {
+            owner = "asdf-vm";
+            repo = "asdf";
+            tag = "v0.20.2";
+            hash = "sha256-HJRNRA98MIOEF/Q3I+cGUL8kH904j3/msI+FGDbRH7A=";
+          };
+          vendorHash = "sha256-ompvvNzfJetcKCRueJxXALiN0rOQwSiytTHJcVXFEOo=";
+        });
+
+        # xwayland-satellite 0.8.2 regressed override-redirect popups: Steam's
+        # context/dropdown menus open and dismiss instantly under niri
+        # (Supreeeme/xwayland-satellite#468, #503). Pin to 0.8.1 until a
+        # release with the fix lands in nixpkgs.
+        xwayland-satellite = prev.xwayland-satellite.overrideAttrs (finalAttrs: old: {
+          version = "0.8.1";
+          src = final.fetchFromGitHub {
+            owner = "Supreeeme";
+            repo = "xwayland-satellite";
+            tag = "v0.8.1";
+            hash = "sha256-BUE41HjLIGPjq3U8VXPjf8asH8GaMI7FYdgrIHKFMXA=";
+          };
+          cargoDeps = final.rustPlatform.fetchCargoVendor {
+            inherit (finalAttrs) pname version src;
+            hash = "sha256-16L6gsvze+m7XCJlOA1lsPNELE3D364ef2FTdkh0rVY=";
+          };
+        });
       })
     ];
 

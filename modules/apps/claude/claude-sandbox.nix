@@ -3,9 +3,15 @@ _: {
   # with basic developer tools.
   #
   # Does the following:
-  #  * claude alias - sets up an alias so the `claude` command sets up a basic
-  #       claud in a nix shell, does not provide sandboxing, useful for
-  #       running claude to help with tasks that require access to the main os
+  #  * claude - runs a basic claude in a nix shell, does not provide
+  #       sandboxing, useful for running claude to help with tasks that
+  #       require access to the main os
+  #
+  #  Both claude and claude-sandbox first bring a git checkout in the current
+  #  directory up to date (claude-git-update.sh): fetch, then fast-forward
+  #  the current branch to its upstream. Diverged branches or local changes
+  #  in the way are reported and left alone; the launch always proceeds.
+  #
   #  * claude-sandbox - the script that runs claude in a sandbox, launches
   #       in the current directory. Claude is launched with asdf tools, and
   #       the ability to spawn its own containers, sandboxed to the running
@@ -28,19 +34,16 @@ _: {
   #       (claude-sandbox-graphify-sidecar.sh) that builds a code knowledge
   #       graph of the project (local tree-sitter AST, no LLM), keeps it
   #       updated, and serves it to Claude as the `graphify` MCP server on the
-  #       pod's localhost. It also exports the graph as Obsidian notes into
-  #       ~/Documents/Obsidian/<vault>/graphify/<git repo name>/; the vault
-  #       is prompted for on a project's first run and remembered per
-  #       project in ~/.local/state/claude-sandbox/graphify-vaults.tsv
-  #       (`--vault <name|none>` changes it, `--no-graphify` skips the
-  #       sidecar for one session). The
+  #       pod's localhost; the graph lives in ./graphify-out (globally
+  #       git-ignored, see modules/apps/git.nix). `--no-graphify` skips
+  #       the sidecar for one session. The
   #       container itself runs under the `ai-sandbox.slice` systemd user
   #       slice (see modules/apps/ai-sandbox-slice.nix) so it fair-shares
   #       CPU/IO/memory against the rest of the desktop session under load.
   #
   # Script bodies live in sibling .sh files (claude-sandbox.sh,
   # claude-sandbox-nested-podman-setup.sh, claude-sandbox-graphify-sidecar.sh)
-  flake.homeModules.claudeSandbox = { pkgs, lib, ... }:
+  flake.homeModules.claudeSandbox = { pkgs, lib, config, ... }:
   let
     # Toolchain for the NESTED podman running inside the sandbox container.
     # Built from the host's nixpkgs and reached through the read-only
@@ -65,6 +68,19 @@ _: {
     # nixpkgs). Bumping this reinstalls on the next sandbox start.
     graphifyVersion = "0.9.73";
 
+    gitUpdate = pkgs.writeShellScript "claude-git-update" ''
+      export PATH=${lib.makeBinPath [ pkgs.git pkgs.coreutils ]}:$PATH
+      ${builtins.readFile ./claude-git-update.sh}
+    '';
+
+    claude = pkgs.writeShellApplication {
+      name = "claude";
+      text = ''
+        ${gitUpdate} "$PWD"
+        exec env NIXPKGS_ALLOW_UNFREE=1 nix-shell -p claude-code --run "claude $(printf '%q ' "$@")"
+      '';
+    };
+
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
@@ -76,7 +92,7 @@ _: {
 
     claudeSandbox = pkgs.writeShellApplication {
       name = "claude-sandbox";
-      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.git pkgs.gawk pkgs.coreutils pkgs.jq ];
+      runtimeInputs = [ pkgs.podman pkgs.nix pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq ];
       text = ''
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
@@ -84,15 +100,13 @@ _: {
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
         export GRAPHIFY_SIDECAR=${./claude-sandbox-graphify-sidecar.sh}
         export GRAPHIFY_VERSION=${graphifyVersion}
+        export CLAUDE_GIT_UPDATE=${gitUpdate}
+        export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
         export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
         exec bash ${./claude-sandbox.sh} "$@"
       '';
     };
   in {
-    home.packages = [ claudeSandbox ];
-
-    home.file.".alias".text = ''
-      alias claude='NIXPKGS_ALLOW_UNFREE=1 nix-shell -p claude-code --run "claude"'
-    '';
+    home.packages = [ claudeSandbox claude ];
   };
 }
