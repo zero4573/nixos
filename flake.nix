@@ -30,6 +30,15 @@
     # NOTE: vicinae ships its own cachix binary cache. Do NOT make it follow
     # our nixpkgs or we lose the cache and rebuild it (and Qt) from source.
     vicinae.url = "github:vicinaehq/vicinae";
+
+    # The ticket workflow (commands, Claude Code plugin, Obsidian vault setup),
+    # its own repo. See modules/apps/claude-tickets.nix. To try local changes
+    # before pushing: --override-input claude-tickets
+    # git+file:///home/ato/Projects/github/zero4573/claude-tickets
+    claude-tickets = {
+      url = "github:zero4573/claude-tickets";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs: inputs.flake-parts.lib.mkFlake

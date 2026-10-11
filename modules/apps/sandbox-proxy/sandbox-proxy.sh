@@ -22,15 +22,26 @@ NPM_PROXY_CONFIG_DIR="$RUNTIME_DIR"
 MCP_NETWORK_NAME="sandbox-mcp"
 MCP_NETWORK_SUBNET="172.30.98.0/24"
 MCP_PROXY_PORT=8080
+# The MCP routes are also published on the host loopback, for host tools that
+# talk to the servers without a model (e.g. a ticket sync). Any local process
+# can use them, with the (read-only) credentials the proxy injects.
+MCP_HOST_PORT="${SANDBOX_PROXY_MCP_HOST_PORT:-47180}"
 MCP_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/sandbox-proxy/mcp-servers.json"
+# Standard MCP config of the host URLs, rewritten whenever the server list
+# changes or the proxy starts
+MCP_HOST_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/sandbox-proxy/mcp-host.json"
 
-touch "$HOME/.custom"
 usage() {
   cat >&2 <<'USAGE'
 Usage:
   sandbox-proxy host-login <host> --npm-repo <repo> --go-repo <repo> --docker-repo <repo>
-  sandbox-proxy start [registry|mcp]   (default: every configured service)
+  sandbox-proxy start [registry|mcp]   (default: every configured service;
+                                        reuses proxies already running with
+                                        the same config)
+  sandbox-proxy restart [registry|mcp] (recreate them, re-reading 1Password,
+                                        e.g. after rotating a credential)
   sandbox-proxy stop
+  sandbox-proxy prune [--days N]   (drop npm-cache tarballs unused for N days, default 60)
   sandbox-proxy status
   sandbox-proxy configured   (silent; exit 0/1, used by the sandbox wrappers)
   sandbox-proxy sandbox-npmrc
@@ -42,11 +53,48 @@ Usage:
   sandbox-proxy mcp list
   sandbox-proxy mcp-configured   (silent; exit 0/1, used by claude-sandbox)
   sandbox-proxy sandbox-mcp-config
+  sandbox-proxy host-mcp-config   (the same servers at 127.0.0.1:$MCP_HOST_PORT;
+                                   also kept in ~/.config/sandbox-proxy/mcp-host.json)
 USAGE
 }
 
 normalize_host() {
   echo "${1%:443}"
+}
+
+# Images, pinned to an exact version and the digest of its multi-arch index
+# (see UPDATES.md to bump). They're part of the containers' fingerprint
+# (below, through this script), so a bump recreates them on the next start.
+CADDY_IMAGE="docker.io/library/caddy:2.11.6@sha256:907efba736324e43f891ccb9d760fe5abe545e313419b3d18d63d4ec670dad8d"
+REGISTRY_IMAGE="docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
+VERDACCIO_IMAGE="docker.io/verdaccio/verdaccio:5.33.0@sha256:9d622d256378c6e7ae09f384774ee2f0f8ac67a66c066db55921a0b7218abc4c"
+DEBIAN_IMAGE="docker.io/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a"
+
+# --- reuse of running proxies ---
+# Every claude-sandbox launch runs `sandbox-proxy start`, and several sessions
+# share these containers. `start` therefore leaves a service alone when its
+# containers are running with the same config: recreating them would cut off
+# the other sessions' in-flight requests, and re-read 1Password every time.
+# Each container carries a fingerprint label of everything it was built from
+# except the secrets (this script itself, the non-secret config, the
+# Caddyfile template), so it's recreated after a config or script change.
+# `restart` forces a recreate, e.g. after rotating a credential in 1Password.
+FINGERPRINT_LABEL="sandbox-proxy.fingerprint"
+FORCE_RECREATE=0
+
+fingerprint() {
+  { cat "$0"; printf '%s\n' "$@"; } | sha256sum | cut -c1-16
+}
+
+# exit 0 if every named container is running with the given fingerprint
+containers_current() {
+  local fp="$1" c state
+  shift
+  [ "$FORCE_RECREATE" = 0 ] || return 1
+  for c in "$@"; do
+    state="$(podman inspect -f "{{.State.Running}} {{index .Config.Labels \"$FINGERPRINT_LABEL\"}}" "$c" 2>/dev/null || true)"
+    [ "$state" = "true $fp" ] || return 1
+  done
 }
 
 ensure_op_signed_in() {
@@ -55,10 +103,13 @@ ensure_op_signed_in() {
   fi
   echo "sandbox-proxy: not signed in to 1Password, running 'op signin'..." >&2
   local signin_exports
-  if ! signin_exports="$(op signin 2>&1)"; then
-    echo "sandbox-proxy: op signin failed: $signin_exports" >&2
+  if ! signin_exports="$(op signin)"; then
+    echo "sandbox-proxy: op signin failed" >&2
     exit 1
   fi
+  # Without the desktop app integration, op signin prints the session
+  # export to apply (with it, it prints nothing)
+  eval "$signin_exports"
 }
 
 # Reads the username/password fields of the 1Password item with the given
@@ -71,6 +122,9 @@ op_get_creds() {
     exit 1
   fi
   ensure_op_signed_in
+  # With the 1Password desktop app integration this waits for you to
+  # approve the access in the app
+  echo "sandbox-proxy: reading '$item' from 1Password (approve it in the 1Password app if asked)..." >&2
   if ! json="$(op item get "$item" --fields label=username,label=password --reveal --format json 2>&1)"; then
     echo "sandbox-proxy: could not read 1Password item '$item': $json" >&2
     exit 1
@@ -158,6 +212,7 @@ discover_config() {
 }
 
 cmd_host_login() {
+  touch "$HOME/.custom"
   local host="${1:-}"
   if [ -z "$host" ]; then
     echo "sandbox-proxy: host-login requires a hostname" >&2
@@ -243,6 +298,22 @@ cmd_start() {
     usage
     exit 1
   fi
+  # Sandboxes launched together (ct start A B C) start in parallel; one
+  # at a time checks and, if needed, (re)creates the shared containers.
+  # The lock must be released explicitly: podman's conmon (and anything else
+  # started here) inherits fd 8 and outlives this script, so merely exiting
+  # would leave the lock held and hang every later start. LOCK_UN on the
+  # shared open file description frees it for good.
+  mkdir -p "$RUNTIME_DIR"
+  exec 8>"$RUNTIME_DIR/start.lock"
+  if ! flock -n 8; then
+    echo "sandbox-proxy: waiting for another sandbox-proxy start to finish (at most 2 minutes)..." >&2
+    if ! flock -w 120 8; then
+      echo "sandbox-proxy: another sandbox-proxy start has held $RUNTIME_DIR/start.lock for 2 minutes; giving up" >&2
+      exit 1
+    fi
+  fi
+  trap 'flock -u 8 2>/dev/null || true' EXIT
   if [ "$only" != mcp ] && cmd_configured; then
     start_registry
     started=1
@@ -259,6 +330,14 @@ cmd_start() {
 
 start_registry() {
   discover_config
+  local fp containers=(registry-proxy registry-cache)
+  [ -n "$NPM_PATH" ] && containers+=(npm-proxy)
+  fp="$(fingerprint "$ARTIFACTORY_HOST" "$NPM_PATH" "$GO_PATH" "$DOCKER_REPO" "$REGISTRY_PROXY_CADDYFILE")"
+  if containers_current "$fp" "${containers[@]}"; then
+    echo "sandbox-proxy: registry proxies already running for $ARTIFACTORY_HOST"
+    return 0
+  fi
+
   op_get_artifactory_creds "$ARTIFACTORY_HOST"
   local auth_b64
   auth_b64="$(printf '%s:%s' "$ARTIFACTORY_USER" "$ARTIFACTORY_PASS" | base64 -w0)"
@@ -273,7 +352,8 @@ start_registry() {
   ensure_network "$NETWORK_NAME" "$NETWORK_SUBNET" registry-proxy registry-cache npm-proxy
   mkdir -p "$CACHE_DIR"
 
-  podman run -d --replace \
+  podman run -d --replace 8>&- \
+    --label "$FINGERPRINT_LABEL=$fp" \
     --name registry-proxy \
     --network "$NETWORK_NAME" \
     --network-alias registry-proxy \
@@ -282,9 +362,10 @@ start_registry() {
     -e ARTIFACTORY_BASIC_AUTH="$auth_b64" \
     -e NPM_STRIP_PREFIX="$npm_strip_prefix" \
     -v "$REGISTRY_PROXY_CADDYFILE:/etc/caddy/Caddyfile:ro" \
-    docker.io/library/caddy:latest
+    "$CADDY_IMAGE"
 
-  podman run -d --replace \
+  podman run -d --replace 8>&- \
+    --label "$FINGERPRINT_LABEL=$fp" \
     --name registry-cache \
     --network "$NETWORK_NAME" --network-alias registry-cache \
     -e REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry \
@@ -292,7 +373,7 @@ start_registry() {
     -e REGISTRY_PROXY_USERNAME="$ARTIFACTORY_USER" \
     -e REGISTRY_PROXY_PASSWORD="$ARTIFACTORY_PASS" \
     -v "$CACHE_DIR:/var/lib/registry" \
-    docker.io/library/registry:2
+    "$REGISTRY_IMAGE"
 
   if [ -n "$NPM_PATH" ]; then
     mkdir -p "$NPM_PROXY_CONFIG_DIR"
@@ -314,18 +395,36 @@ EOF
 
     podman volume create "$NPM_PROXY_STORAGE_VOLUME" >/dev/null 2>&1 || true
 
-    podman run -d --replace \
+    podman run -d --replace 8>&- \
+      --label "$FINGERPRINT_LABEL=$fp" \
       --name npm-proxy \
       --network "$NETWORK_NAME" --network-alias npm-proxy \
       -e ARTIFACTORY_TOKEN="$ARTIFACTORY_PASS" \
       -e VERDACCIO_PUBLIC_URL="https://$ARTIFACTORY_HOST$NPM_PATH" \
       -v "$NPM_PROXY_CONFIG_DIR/verdaccio-config.yaml:/verdaccio/conf/config.yaml:ro" \
       -v "$NPM_PROXY_STORAGE_VOLUME:/verdaccio/storage" \
-      docker.io/verdaccio/verdaccio:5
+      "$VERDACCIO_IMAGE"
   fi
 
   local path_shown="${NPM_PATH:-${GO_PATH:-unset}}"
   echo "sandbox-proxy: started for $ARTIFACTORY_HOST (npm/go path: $path_shown)"
+}
+
+# The npm cache (Verdaccio's volume) keeps every tarball ever fetched; drop
+# the ones not fetched again for --days (default 60). Verdaccio refetches a
+# missing one from Artifactory on demand. The image cache (registry:2 in
+# proxy mode) expires blobs by itself (7 days).
+cmd_prune() {
+  local days=60
+  if [ "${1:-}" = --days ]; then
+    days="${2:-}"
+  fi
+  case "$days" in
+    ""|*[!0-9]*) echo "sandbox-proxy: prune --days needs a number" >&2; exit 1 ;;
+  esac
+  podman volume exists "$NPM_PROXY_STORAGE_VOLUME" || { echo "sandbox-proxy: no npm cache to prune"; return 0; }
+  podman run --rm -v "$NPM_PROXY_STORAGE_VOLUME:/storage" "$DEBIAN_IMAGE" \
+    sh -c "find /storage -name '*.tgz' -atime +$days -print -delete | wc -l | xargs echo 'sandbox-proxy: removed npm tarballs:'; du -sh /storage"
 }
 
 cmd_stop() {
@@ -414,7 +513,8 @@ cmd_mcp() {
       mkdir -p "$(dirname "$MCP_CONFIG")"
       mcp_config_json | jq --arg n "$name" 'del(.[$n])' > "$MCP_CONFIG.tmp"
       mv "$MCP_CONFIG.tmp" "$MCP_CONFIG"
-      echo "sandbox-proxy: removed MCP server '$name' (restart running sandboxes to apply)"
+      write_host_mcp_config
+      echo "sandbox-proxy: removed MCP server '$name' (the proxy is updated on the next sandbox start; running sandboxes keep it until restarted)"
       ;;
     list)
       mcp_config_json | jq -r 'to_entries[] | "\(.key)\t\(.value.url)\t1password:\(.value.opItem)\t\(.value.auth)"'
@@ -458,7 +558,8 @@ cmd_mcp_add() {
   mcp_config_json | jq --arg n "$name" --arg u "$url" --arg i "$op_item" --arg a "$auth" \
     '.[$n] = {url: $u, opItem: $i, auth: $a}' > "$MCP_CONFIG.tmp"
   mv "$MCP_CONFIG.tmp" "$MCP_CONFIG"
-  echo "sandbox-proxy: added MCP server '$name' -> $url (restart running sandboxes to apply)"
+  write_host_mcp_config
+  echo "sandbox-proxy: added MCP server '$name' -> $url (the proxy is updated on the next sandbox start; running sandboxes need a restart to see it)"
 }
 
 # exit 0 if at least one MCP server is configured, 1 otherwise
@@ -471,12 +572,21 @@ cmd_mcp_configured() {
 # container via -e, never written to disk.
 start_mcp() {
   local config names name url auth op_item scheme_host host path env_name
-  local env_flags=()
+  local env_flags=() fp
   config="$(mcp_config_json)"
   mapfile -t names < <(jq -r 'keys[]' <<< "$config")
 
   mkdir -p "$RUNTIME_DIR"
   local caddyfile="$RUNTIME_DIR/mcp-Caddyfile"
+  # Reuse the running proxy unless the server list changed (secrets aren't
+  # part of the fingerprint: `restart mcp` after rotating one). The generated
+  # Caddyfile lives in the runtime dir, so it must still be there too.
+  fp="$(fingerprint "$config" "$MCP_HOST_PORT")"
+  write_host_mcp_config
+  if [ -s "$caddyfile" ] && containers_current "$fp" mcp-proxy; then
+    echo "sandbox-proxy: MCP proxy already running for: ${names[*]}"
+    return 0
+  fi
   {
     echo "{"
     echo "	auto_https off"
@@ -522,15 +632,29 @@ EOF
 
   ensure_network "$MCP_NETWORK_NAME" "$MCP_NETWORK_SUBNET" mcp-proxy
 
-  podman run -d --replace \
+  podman run -d --replace 8>&- \
+    --label "$FINGERPRINT_LABEL=$fp" \
     --name mcp-proxy \
     --network "$MCP_NETWORK_NAME" \
     --network-alias mcp-proxy \
+    -p "127.0.0.1:$MCP_HOST_PORT:$MCP_PROXY_PORT" \
     "${env_flags[@]}" \
     -v "$caddyfile:/etc/caddy/Caddyfile:ro" \
-    docker.io/library/caddy:latest >/dev/null
+    "$CADDY_IMAGE" >/dev/null
 
   echo "sandbox-proxy: MCP proxy started for: ${names[*]}"
+}
+
+# The credential-free MCP config of the host URLs (127.0.0.1)
+cmd_host_mcp_config() {
+  mcp_config_json | jq -c --arg port "$MCP_HOST_PORT" '{mcpServers: (to_entries
+    | map(select(.key | test("^[a-z0-9][a-z0-9-]*$")))
+    | map({key, value: {type: "http", url: "http://127.0.0.1:\($port)/\(.key)"}})
+    | from_entries)}'
+}
+write_host_mcp_config() {
+  mkdir -p "$(dirname "$MCP_HOST_CONFIG")"
+  cmd_host_mcp_config > "$MCP_HOST_CONFIG.tmp" && mv "$MCP_HOST_CONFIG.tmp" "$MCP_HOST_CONFIG"
 }
 
 # Prints the credential-free MCP config claude-sandbox passes to claude
@@ -544,7 +668,9 @@ cmd_sandbox_mcp_config() {
 case "${1:-}" in
   host-login) shift; cmd_host_login "$@" ;;
   start) shift; cmd_start "$@" ;;
+  restart) shift; FORCE_RECREATE=1; cmd_start "$@" ;;
   stop) cmd_stop ;;
+  prune) shift; cmd_prune "$@" ;;
   status) cmd_status ;;
   configured) cmd_configured ;;
   sandbox-npmrc) cmd_sandbox_npmrc ;;
@@ -554,5 +680,6 @@ case "${1:-}" in
   mcp) shift; cmd_mcp "$@" ;;
   mcp-configured) cmd_mcp_configured ;;
   sandbox-mcp-config) cmd_sandbox_mcp_config ;;
+  host-mcp-config) cmd_host_mcp_config ;;
   *) usage; exit 1 ;;
 esac

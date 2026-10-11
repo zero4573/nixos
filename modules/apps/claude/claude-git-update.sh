@@ -13,7 +13,9 @@ warn() {
   echo "claude: $*" >&2
 }
 
-if ! GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$dir" fetch --prune --quiet 2>/dev/null; then
+# BatchMode: an SSH key prompt fails the fetch instead of hanging the launch
+if ! GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+    timeout 30 git -C "$dir" fetch --prune --quiet 2>/dev/null; then
   warn "git fetch failed (offline or auth?), launching on the local checkout"
   exit 0
 fi

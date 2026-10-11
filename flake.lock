@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "claude-tickets": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791084890,
+        "narHash": "sha256-6QvDddEbe/GB/bU/XPaSxN+BUyegGYV3GPld8VrtaLk=",
+        "owner": "zero4573",
+        "repo": "claude-tickets",
+        "rev": "421ff2848ad36f654998da2b5cf5b67be42a9e2b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zero4573",
+        "repo": "claude-tickets",
+        "type": "github"
+      }
+    },
     "disko": {
       "inputs": {
         "nixpkgs": [
@@ -191,6 +211,7 @@
     },
     "root": {
       "inputs": {
+        "claude-tickets": "claude-tickets",
         "disko": "disko",
         "flake-parts": "flake-parts",
         "home-manager": "home-manager",

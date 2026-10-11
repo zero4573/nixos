@@ -126,6 +126,7 @@
       zip
       unzip
       jq
+      tree
       gnumake
       bind
       gcc

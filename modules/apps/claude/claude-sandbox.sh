@@ -1,95 +1,146 @@
-port_flags=()
-dir_mounts=()
-add_dir_flags=()
-graphify_enabled=1
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --ports)
-      if [[ $# -lt 2 ]]; then
-        echo "claude-sandbox: --ports requires a value" >&2
-        exit 1
-      fi
-      IFS=',' read -ra ports <<< "$2"
-      for p in "${ports[@]}"; do
-        if ! [[ "$p" =~ ^[0-9]+$ ]]; then
-          echo "claude-sandbox: --ports value must be a comma-separated list of numbers: $p" >&2
-          exit 1
-        fi
-        port_flags+=(-p "$p:$p")
-      done
-      shift 2
-      ;;
-    --dirs)
-      if [[ $# -lt 2 ]]; then
-        echo "claude-sandbox: --dirs requires a value" >&2
-        exit 1
-      fi
-      IFS=',' read -ra dirs <<< "$2"
-      for d in "${dirs[@]}"; do
-        if [[ ! -d "$d" ]]; then
-          echo "claude-sandbox: --dirs entry is not a directory: $d" >&2
-          exit 1
-        fi
-        abs_d="$(realpath "$d")"
-        dir_mounts+=(-v "$abs_d:$abs_d:rw")
-        add_dir_flags+=(--add-dir "$abs_d")
-      done
-      shift 2
-      ;;
-    --no-graphify)
-      graphify_enabled=0
-      shift
-      ;;
-    --)
-      shift
-      break
-      ;;
-    -h|--help)
-      cat <<'EOF'
-Usage: claude-sandbox [--ports <list>] [--dirs <list>] [--no-graphify]
-                      [--] [claude args...]
+# Launch log: every step is timestamped (seconds since launch) on stderr --
+# --quiet keeps only warnings there -- and always appended to
+# ~/.local/state/claude-sandbox.log, so a launch that hangs shows which step
+# it's stuck in (tail -f that file from another terminal)
+launch_log="${XDG_STATE_HOME:-$HOME/.local/state}/claude-sandbox.log"
+mkdir -p "$(dirname "$launch_log")"
+if [[ "$(stat -c %s "$launch_log" 2>/dev/null || echo 0)" -gt 5242880 ]]; then
+  tail -c 1048576 "$launch_log" > "$launch_log.tmp" && mv "$launch_log.tmp" "$launch_log"
+fi
+launch_start="${EPOCHREALTIME//[.,]/}"
+quiet=0
+log_line() {
+  local now ms
+  now="${EPOCHREALTIME//[.,]/}"
+  ms=$(( (now - launch_start) / 1000 ))
+  printf 'claude-sandbox [%d.%ds] %s\n' $((ms / 1000)) $(((ms % 1000) / 100)) "$1"
+  printf '%s [%s] %s\n' "$(date -Iseconds)" "${pod_name:-pid $$}" "$1" >> "$launch_log" 2>/dev/null || true
+}
+log() {
+  if [[ "$quiet" == 1 ]]; then
+    log_line "$*" >/dev/null
+  else
+    log_line "$*" >&2
+  fi
+}
+warn() {
+  log_line "warning: $*" >&2
+}
 
-Runs Claude Code inside a sandboxed, privileged rootless podman container
-scoped to the current directory.
 
-Options:
-  --ports <list>  Comma-separated list of ports to publish from the
-                  container to the same port on the host, e.g.
-                  --ports 3000,5173
-  --dirs <list>   Comma-separated list of additional host directories to
-                  bind-mount read-write into the container (at the same
-                  absolute path) and register with claude via --add-dir,
-                  e.g. --dirs /home/user/other-project
-  --no-graphify   Don't start the graphify sidecar (code graph MCP server,
-                  kept in ./graphify-out) for this session.
-  --              Stop parsing claude-sandbox's own flags; everything
-                  after is passed straight through to the claude CLI
-                  untouched.
-  -h, --help      Show this help and exit.
+# Every argument belongs to claude and is passed through untouched; the
+# sandbox only reads the ones that say what the session may touch (see
+# "Mounts" below). Settings of the sandbox itself come from the environment:
+#   CLAUDE_SANDBOX_PORTS        comma-separated ports to publish on the same
+#                               host port, e.g. 3000,5173
+#   CLAUDE_SANDBOX_NAME         pod label instead of <repo>-<folder>
+#   CLAUDE_SANDBOX_QUIET=1      only warnings while launching
+#   CLAUDE_SANDBOX_NO_GRAPHIFY=1  no graphify sidecar for this session
+#   CLAUDE_SANDBOX_PASS_ENV     space-separated globs of host environment
+#                               variables to pass in, e.g. "CLAUDE_TICKETS_*"
+if [[ "${CLAUDE_SANDBOX_AS:-}" == claude-sandbox && "${1:-}" =~ ^(-h|--help)$ ]]; then
+  cat <<'EOF'
+Usage: claude [claude args...]        (claude-sandbox is the same command)
+
+Runs Claude Code inside a sandboxed, privileged rootless podman container,
+scoped to the current directory. The arguments are claude's own and are
+passed through untouched (claude --help lists them); claude-open runs the
+unsandboxed CLI.
+
+What the session can see and change follows Claude's own settings:
+  * read-write: the current directory and every --add-dir directory (from
+    the arguments, and permissions.additionalDirectories in the user,
+    project and --settings settings)
+  * read-only: the paths of Edit(...) / Write(...) deny rules in those
+    settings, when they lie inside a read-write directory; the most
+    specific path wins, so a deny inside an --add-dir directory, or an
+    --add-dir inside a denied one, works as expected. Rule paths follow
+    Claude's syntax (//abs, ~/home, relative); * globs are expanded at
+    launch, a ** in the middle of a path isn't
+  * files named by --settings, --mcp-config, --plugin-dir and the
+    --*system-prompt-file flags, read-only
+  * /nix/store, ~/.claude (its settings, skills and agents read-only), and
+    any vault's .obsidian/ read-only
+
+Sandbox settings (environment):
+  CLAUDE_SANDBOX_PORTS=3000,5173   publish ports on the same host ports
+  CLAUDE_SANDBOX_NAME=<label>      pod claude-sandbox-<label>
+  CLAUDE_SANDBOX_QUIET=1           only print warnings while launching
+  CLAUDE_SANDBOX_NO_GRAPHIFY=1     skip the graphify sidecar (it's also
+                                   skipped when an --mcp-config already
+                                   defines a graphify server)
+  CLAUDE_SANDBOX_PASS_ENV="A_* B"  host variables to pass in (name globs)
 
 If the current directory is a git checkout, it is fetched and fast-forwarded
 to its upstream before launch; diverged branches or local changes in the
-way are reported and left alone.
-
-Anything else is passed straight through to the claude CLI.
+way are reported and left alone. Each launch step is printed with the
+seconds since launch, and logged to ~/.local/state/claude-sandbox.log.
 EOF
-      exit 0
-      ;;
-    *)
-      break
-      ;;
-  esac
-done
+  exit 0
+fi
 
+[[ "${CLAUDE_SANDBOX_QUIET:-}" == 1 ]] && quiet=1
+port_flags=()
+IFS=',' read -ra ports <<< "${CLAUDE_SANDBOX_PORTS:-}"
+for p in "${ports[@]}"; do
+  [[ -n "$p" ]] || continue
+  if ! [[ "$p" =~ ^[0-9]+$ ]]; then
+    echo "claude-sandbox: CLAUDE_SANDBOX_PORTS must be a comma-separated list of numbers: $p" >&2
+    exit 1
+  fi
+  port_flags+=(-p "$p:$p")
+done
+graphify_enabled=1
+[[ "${CLAUDE_SANDBOX_NO_GRAPHIFY:-}" == 1 ]] && graphify_enabled=0
+name_override="${CLAUDE_SANDBOX_NAME:-}"
+
+# The arguments the sandbox reads (never changes): --add-dir (variadic, like
+# claude's), --settings (a file or a JSON string), --mcp-config (variadic,
+# files or JSON strings), and flags naming files claude reads
+add_dirs=() settings_args=() mcp_args=() path_args=()
+args=("$@")
+i=0
+take_list() {  # take_list <array name>: the values after a variadic flag
+  local -n into="$1"
+  while (( i + 1 < ${#args[@]} )) && [[ "${args[i + 1]}" != -* ]]; do
+    i=$((i + 1))
+    into+=("${args[i]}")
+  done
+}
+while (( i < ${#args[@]} )); do
+  a="${args[i]}"
+  case "$a" in
+    --) break ;;
+    --add-dir=*) add_dirs+=("${a#*=}") ;;
+    --add-dir) take_list add_dirs ;;
+    --mcp-config=*) mcp_args+=("${a#*=}") ;;
+    --mcp-config) take_list mcp_args ;;
+    --settings=*) settings_args+=("${a#*=}") ;;
+    --settings) i=$((i + 1)); settings_args+=("${args[i]:-}") ;;
+    --plugin-dir=*|--append-system-prompt-file=*|--system-prompt-file=*) path_args+=("${a#*=}") ;;
+    --plugin-dir|--append-system-prompt-file|--system-prompt-file) i=$((i + 1)); path_args+=("${args[i]:-}") ;;
+  esac
+  i=$((i + 1))
+done
 project_root="$PWD"
+log "launching in $project_root (log: $launch_log)"
 
 # Fast-forward a git checkout to its upstream before anything else, so the
 # graphify sidecar's startup build and watch begin on the updated tree
-"$CLAUDE_GIT_UPDATE" "$project_root"
+if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  log "updating the git checkout (git fetch, at most 30s)"
+  "$CLAUDE_GIT_UPDATE" "$project_root"
+fi
 asdf_data_dir="$HOME/.asdf"
 
 # Consolidated exit cleanup
 cleanup() {
+  local code=$?
+  if [[ -z "${claude_started:-}" ]]; then
+    log "launch aborted (exit $code)"
+  else
+    log_line "session ended (exit $code)" >/dev/null
+  fi
   [[ -n "${dbus_proxy_pid:-}" ]] && kill "$dbus_proxy_pid" 2>/dev/null || true
   [[ -n "${pod_name:-}" ]] && podman pod rm -f -t 5 "$pod_name" >/dev/null 2>&1 || true
   [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]] && rm -rf "$tmp_dir"
@@ -97,13 +148,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export NIXPKGS_ALLOW_UNFREE=1
-claude_out="$(NIXPKGS_ALLOW_UNFREE=1 nix build \
-    --impure \
-    --no-link \
-    --print-out-paths \
-    'nixpkgs#claude-code'
-)"
+# claude-code is built with the system (programs.claudeSandbox.package, from
+# the flake's locked nixpkgs), so launching evaluates and downloads nothing
+claude_out="$CLAUDE_CODE"
+log "claude-code: $claude_out"
 
 # Claude's own auth/session state
 mkdir -p "$HOME/.claude"
@@ -121,7 +169,9 @@ if command -v sandbox-proxy >/dev/null 2>&1; then
   sandbox-proxy configured && proxy_registry=1
   sandbox-proxy mcp-configured && proxy_mcp=1
   if [[ "$proxy_registry" == 1 || "$proxy_mcp" == 1 ]]; then
+    log "starting sandbox-proxy (registry=$proxy_registry mcp=$proxy_mcp; reuses running containers, may wait for 1Password or another launch's start)"
     sandbox-proxy start
+    log "sandbox-proxy ready"
   fi
 fi
 
@@ -131,6 +181,7 @@ proxy_mcp_config=""
 if [[ "$proxy_mcp" == 1 ]]; then
   network_flags+=(--network sandbox-mcp)
   proxy_mcp_config="$(sandbox-proxy sandbox-mcp-config)"
+  log "MCP servers from sandbox-proxy: $(jq -r '.mcpServers | keys | join(", ")' <<< "$proxy_mcp_config" 2>/dev/null)"
 fi
 
 if [[ "$proxy_registry" == 1 ]]; then
@@ -155,9 +206,9 @@ if [[ "$proxy_registry" == 1 ]]; then
 fi
 
 # DBus notification proxy: xdg-dbus-proxy sits between the container and the 
-# real bus and, and only allows calls to to org.freedesktop.Notifications. The
+# real bus, and only allows calls to org.freedesktop.Notifications. The
 # filtered socket is then bind-mounted in, allowing for safe use of dbus for
-# notifications in a the sandboxed environment
+# notifications in the sandboxed environment
 dbus_mounts=()
 dbus_env_flags=()
 real_bus_address="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
@@ -165,6 +216,7 @@ if [[ "$real_bus_address" == unix:path=* || "$real_bus_address" == unix:abstract
   dbus_proxy_dir="$(mktemp -d)"
   dbus_proxy_socket="$dbus_proxy_dir/notify-bus"
 
+  log "starting the DBus notification proxy (at most 25s)"
   xdg-dbus-proxy "$real_bus_address" "$dbus_proxy_socket" \
     --filter \
     --talk=org.freedesktop.Notifications &
@@ -179,7 +231,7 @@ if [[ "$real_bus_address" == unix:path=* || "$real_bus_address" == unix:abstract
     dbus_mounts+=(-v "$dbus_proxy_socket:$dbus_proxy_socket")
     dbus_env_flags+=(-e "DBUS_SESSION_BUS_ADDRESS=unix:path=$dbus_proxy_socket")
   else
-    echo "claude-sandbox: DBus notification proxy didn't come up, sandbox notifications will be unavailable" >&2
+    warn "DBus notification proxy didn't come up, sandbox notifications will be unavailable"
     kill "$dbus_proxy_pid" 2>/dev/null || true
     dbus_proxy_pid=""
   fi
@@ -187,11 +239,11 @@ fi
 
 # Claude and the graphify sidecar share one pod, and with it a network
 # namespace, so the sidecar's MCP endpoint is reachable on Claude's
-# localhost without being published anywhere else. Ports/networks that used
-# to sit on the claude container live on the pod now.
+# localhost without being published anywhere else. Ports and networks are
+# set on the pod.
 #
 # Everything is named after the git repo (origin's URL, else the first
-# remote) plus the checkout folder, e.g. claude-sandbox-ships-service-db4005a08
+# remote) plus the checkout folder, e.g. claude-sandbox-billing-service-db4005a08
 # for a clone/worktree in ./db4005a08, or just the folder when it matches the
 # repo name or there's no remote. A -2, -3, ... suffix keeps concurrent
 # sessions in the same checkout apart. Labels make them filterable:
@@ -208,7 +260,9 @@ repo_name="${remote_url%/}"
 repo_name="${repo_name%.git}"
 repo_name="$(sanitize_name "${repo_name##*[/:]}")"
 folder_name="$(sanitize_name "$(basename "$project_root")")"
-if [[ -n "$repo_name" && "$repo_name" != "$folder_name" ]]; then
+if [[ -n "$name_override" ]]; then
+  name_base="$(sanitize_name "$name_override")"
+elif [[ -n "$repo_name" && "$repo_name" != "$folder_name" ]]; then
   name_base="$repo_name-$folder_name"
 else
   name_base="${folder_name:-project}"
@@ -223,25 +277,51 @@ name_labels=(
   --label "claude-sandbox.project=$project_root"
   --label "claude-sandbox.repo=${repo_name:-}"
 )
+# Pods of sessions that died without cleaning up (killed, terminal closed,
+# reboot) keep their graphify sidecar running. Remove the ones whose claude
+# container is gone and that are over 10 minutes old (a new session's pod
+# legitimately runs only its sidecar for minutes while the graph builds).
+# (podman calls hang when another podman process holds its storage lock, so
+# this is where a stuck podman first shows)
+log "podman: checking for orphaned claude-sandbox pods"
+now="$(date +%s)"
+while read -r old_pod created; do
+  [[ -n "$old_pod" && "$created" =~ ^[0-9]+$ ]] || continue
+  [[ "$(podman inspect -f '{{.State.Running}}' "$old_pod-claude" 2>/dev/null)" == true ]] && continue
+  (( now - created > 600 )) || continue
+  podman pod rm -f -t 0 "$old_pod" >/dev/null 2>&1 \
+    && log "removed the orphaned pod $old_pod"
+done < <(podman pod ps --filter label=claude-sandbox.project --format '{{.Name}} {{.Created.Unix}}' 2>/dev/null || true)
+
+# Containers go in aisandbox.slice (modules/apps/ai-sandbox-slice.nix) for
+# its CPU, IO and memory limits; podman only honours that through the pod's
+# cgroup parent, not through the systemd-run scope around the podman CLI
+cgroup_flags=(--cgroup-parent=aisandbox.slice)
 pod_name=""
 n=1
+log "podman: creating the pod"
 while [[ -z "$pod_name" ]]; do
   candidate="$name_base"
   [[ "$n" -gt 1 ]] && candidate="$name_base-$n"
   n=$((n + 1))
   podman pod exists "$candidate" && continue
   if create_err="$(podman pod create --name "$candidate" --infra-name "$candidate-infra" \
+      "${cgroup_flags[@]}" \
       "${name_labels[@]}" \
       "${port_flags[@]}" \
       "${network_flags[@]}" 2>&1 >/dev/null)"; then
     pod_name="$candidate"
+  elif grep -qi "cgroup" <<< "$create_err" && [[ ${#cgroup_flags[@]} -gt 0 ]]; then
+    warn "can't place the pod in aisandbox.slice ($create_err); continuing without its limits"
+    cgroup_flags=()
+    n=$((n - 1))
   elif ! grep -qi "already" <<< "$create_err"; then
     # Not a name clash but a real failure (e.g. a --ports conflict)
-    echo "claude-sandbox: couldn't create pod $candidate: $create_err" >&2
+    warn "couldn't create pod $candidate: $create_err"
     exit 1
   fi
 done
-echo "claude-sandbox: pod $pod_name" >&2
+log "pod $pod_name"
 
 # graphify sidecar: builds a code graph of the project into ./graphify-out
 # (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
@@ -268,9 +348,22 @@ has_graphify_sources() {
   fi | grep -zqE "$graphify_code_re"
 }
 
+# A session that already brings a graphify MCP server (--mcp-config, e.g.
+# a merged graph of several repos) doesn't need the repo sidecar
 if [[ "$graphify_enabled" == 1 ]]; then
+  for m in "${mcp_args[@]}"; do
+    if [[ "$m" == \{* ]]; then json="$m"; else json="$(cat "$m" 2>/dev/null || true)"; fi
+    if jq -e '.mcpServers.graphify' >/dev/null 2>&1 <<< "$json"; then
+      log "graphify: the session brings its own graphify server, skipping the sidecar"
+      graphify_enabled=0
+      break
+    fi
+  done
+fi
+if [[ "$graphify_enabled" == 1 ]]; then
+  log "graphify: looking for source files it can parse"
   if ! has_graphify_sources; then
-    echo "claude-sandbox: no source files graphify can parse here, skipping the graphify sidecar" >&2
+    log "graphify: no source files it can parse here, skipping the sidecar"
     graphify_enabled=0
   fi
 fi
@@ -278,8 +371,9 @@ fi
 if [[ "$graphify_enabled" == 1 ]]; then
   graphify_port=47100
   graphify_key="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
-  systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \
-  podman run -d \
+  log "graphify: starting the sidecar (pulls its image on first use)"
+  systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
+  podman run -d --rm \
     --name "$pod_name-graphify" \
     --pod "$pod_name" \
     "${name_labels[@]}" \
@@ -287,22 +381,27 @@ if [[ "$graphify_enabled" == 1 ]]; then
     --pull=missing \
     -v claude-sandbox-graphify:/opt/graphify \
     -v "$GRAPHIFY_SIDECAR:/sidecar.sh:ro" \
+    -v "$GRAPHIFY_INSTALL:/graphify-install.sh:ro" \
     -v "$project_root:$project_root:rw" \
-    -e GRAPHIFY_VERSION="$GRAPHIFY_VERSION" \
+    -v "$GRAPHIFY_LOCK:/graphify-requirements.txt:ro" \
     -e GRAPHIFY_PORT="$graphify_port" \
     -e GRAPHIFY_API_KEY="$graphify_key" \
     -e PROJECT_ROOT="$project_root" \
     -e GRAPHIFY_QUERY_LOG_DISABLE=1 \
-    docker.io/library/python:3.12-slim \
+    "$GRAPHIFY_IMAGE" \
     sh /sidecar.sh >/dev/null
-
   # First run pip-installs graphify and the first graph build of a large
-  # repo can take a while, so wait for the MCP endpoint before starting Claude
-  echo "claude-sandbox: starting the graphify sidecar; building the code graph can take a few minutes on a large or first-time project (--no-graphify skips it, podman logs -f $pod_name-graphify follows it)..." >&2
+  # repo can take a while, so wait for the MCP endpoint before starting Claude,
+  # reporting the last line of the sidecar's log every 15s meanwhile
+  log "graphify: waiting for the MCP server, at most 5 min; installing graphify and building the code graph can take minutes on a large or first-time project (--no-graphify skips it, podman logs -f $pod_name-graphify follows it)"
   graphify_ready=0
-  for _ in $(seq 1 300); do
+  for i in $(seq 1 300); do
     if [[ "$(podman inspect -f '{{.State.Running}}' "$pod_name-graphify" 2>/dev/null)" != true ]]; then
+      warn "graphify: the sidecar exited"
       break
+    fi
+    if (( i % 15 == 0 )); then
+      log "graphify: still waiting; sidecar: $(podman logs --tail 1 "$pod_name-graphify" 2>&1 | tail -n1 | cut -c1-160)"
     fi
     if podman exec "$pod_name-graphify" python3 -c \
         'import socket, sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1)' \
@@ -314,9 +413,10 @@ if [[ "$graphify_enabled" == 1 ]]; then
   done
 
   if [[ "$graphify_ready" == 1 ]]; then
+    log "graphify: ready"
     graphify_mcp_config="{\"mcpServers\":{\"graphify\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:$graphify_port/mcp\",\"headers\":{\"Authorization\":\"Bearer $graphify_key\"}}}}"
   else
-    echo "claude-sandbox: graphify sidecar didn't come up, continuing without it:" >&2
+    warn "graphify: the sidecar didn't come up, continuing without it:"
     podman logs --tail 20 "$pod_name-graphify" >&2 2>&1 || true
     podman rm -f -t 0 "$pod_name-graphify" >/dev/null 2>&1 || true
   fi
@@ -324,7 +424,8 @@ fi
 
 # All MCP servers go into one file passed as --mcp-config=<file>: the flag
 # is variadic, so a separate value would swallow a following positional
-# prompt as another config file
+# prompt as another config file. claude merges it with any --mcp-config of
+# the caller.
 mcp_flags=()
 if [[ -n "$proxy_mcp_config$graphify_mcp_config" ]]; then
   printf '%s\n' "$proxy_mcp_config" "$graphify_mcp_config" \
@@ -333,8 +434,187 @@ if [[ -n "$proxy_mcp_config$graphify_mcp_config" ]]; then
   mcp_flags+=("--mcp-config=$tmp_dir/mcp.json")
 fi
 
-systemd-run --user --scope --quiet --collect --slice=ai-sandbox.slice -- \
-podman run --rm -it \
+# Mounts, from Claude's own view of what the session may touch:
+#  * read-write: the project and each --add-dir directory, from the
+#    arguments and from permissions.additionalDirectories in the user,
+#    project and --settings settings
+#  * read-only: the paths of the Edit/Write/NotebookEdit deny rules in those
+#    settings, but only inside a read-write directory (a deny elsewhere just
+#    stays a permission rule: mounting it would expose it)
+# The most specific path is mounted last, so it wins: ~/Projects read-only,
+# a clone's .git read-write inside it, its .git/config read-only again.
+settings_sources=()  # "<base dir>\t<json>": where relative rule paths start
+add_settings() {
+  local json
+  json="$(cat "$2" 2>/dev/null || true)"
+  [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<< "$json" \
+    && settings_sources+=("$1"$'\t'"$json")
+  return 0
+}
+add_settings "$HOME/.claude" "$HOME/.claude/settings.json"
+add_settings "$project_root" "$project_root/.claude/settings.json"
+add_settings "$project_root" "$project_root/.claude/settings.local.json"
+for s in "${settings_args[@]}"; do
+  if [[ "$s" == \{* ]]; then
+    jq -e . >/dev/null 2>&1 <<< "$s" && settings_sources+=("$project_root"$'\t'"$s")
+  else
+    add_settings "$project_root" "$s"
+    path_args+=("$s")
+  fi
+done
+
+# A path of a Claude rule or setting, made absolute: //abs, ~/home, /x
+# relative to the settings' base, anything else relative to the project
+abs_path() {  # abs_path <path> <base>
+  local p="$1"
+  case "$p" in
+    //*) p="${p#/}" ;;
+    "~"|"~/"*) p="$HOME${p#\~}" ;;
+    /*) p="$2$p" ;;
+    *) p="$project_root/$p" ;;
+  esac
+  realpath -m "$p"
+}
+
+rw_paths=("$(realpath -m "$project_root")")
+for d in "${add_dirs[@]}"; do
+  [[ "$d" == /* || "$d" == "~"* ]] || d="$PWD/$d"
+  [[ "$d" == "~"* ]] && d="$HOME${d#\~}"
+  if [[ -d "$d" ]]; then
+    rw_paths+=("$(realpath "$d")")
+  else
+    warn "--add-dir $d isn't a directory, not mounting it"
+  fi
+done
+ro_paths=()
+for src in "${settings_sources[@]}"; do
+  base="${src%%$'\t'*}"
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    d="$(abs_path "$d" "$base")"
+    [[ -d "$d" ]] && rw_paths+=("$d")
+  done < <(jq -r '.permissions.additionalDirectories[]? // empty' <<< "${src#*$'\t'}")
+  while IFS= read -r rule; do
+    [[ -n "$rule" ]] || continue
+    rule="${rule%/\*\*}"
+    rule="${rule%/\*}"
+    if [[ "$rule" == *"**"* ]]; then
+      log "mounts: '$rule' has a ** inside the path, left to the permission rule"
+      continue
+    fi
+    rule="$(abs_path "$rule" "$base")"
+    if [[ "$rule" == *[*?[]* ]]; then
+      # shellcheck disable=SC2206 # the glob is meant to expand
+      local_matches=($rule)
+      for m in "${local_matches[@]}"; do [[ -e "$m" ]] && ro_paths+=("$m"); done
+    elif [[ -e "$rule" ]]; then
+      ro_paths+=("$rule")
+    fi
+  done < <(jq -r '.permissions.deny[]? // empty
+    | capture("^(Edit|Write|NotebookEdit)\\((?<p>.+)\\)$")?.p // empty' <<< "${src#*$'\t'}")
+done
+
+# within <path> <dir>...: true when <path> is one of the dirs or inside one
+within() {
+  local p="$1" d
+  shift
+  for d in "$@"; do
+    [[ "$p" == "$d" || "$p" == "$d"/* ]] && return 0
+  done
+  return 1
+}
+
+# One mount per path (podman refuses two on the same destination, and
+# orders them by depth itself, so the more specific path ends up on top);
+# read-only wins over read-write on the same path
+project_abs="$(realpath -m "$project_root")"
+project_mode=rw
+declare -A mount_mode=()
+for p in "${rw_paths[@]}"; do
+  [[ "$p" == "$project_abs" ]] || mount_mode[$p]=rw
+done
+for p in "${ro_paths[@]}"; do
+  within "$p" "${rw_paths[@]}" || continue
+  if [[ "$p" == "$project_abs" ]]; then
+    project_mode=ro
+  else
+    mount_mode[$p]=ro
+  fi
+done
+
+# A git directory given read-write on its own (e.g. a main clone's .git, so
+# the session can add worktrees to it) keeps its config and hooks read-only:
+# from there a session could run code on the host the next time git runs in
+# that clone. (hooks/ is created first, or the session could create it.)
+for p in "${!mount_mode[@]}"; do
+  [[ "${mount_mode[$p]}" == rw && "$(basename "$p")" == .git ]] || continue
+  mkdir -p "$p/hooks"
+  mount_mode[$p/hooks]=ro
+  [[ -f "$p/config" ]] && mount_mode[$p/config]=ro
+done
+
+# Files claude is told to read (settings, MCP configs, plugins, prompt
+# files): mounted read-only when they aren't visible already
+for f in "${path_args[@]}" "${mcp_args[@]}"; do
+  [[ -n "$f" && "$f" != \{* ]] || continue
+  [[ "$f" == /* ]] || f="$PWD/$f"
+  [[ -e "$f" ]] || continue
+  f="$(realpath "$f")"
+  within "$f" "${rw_paths[@]}" /nix/store "$HOME/.claude" || mount_mode[$f]=ro
+done
+
+dir_mounts=()
+for p in "${!mount_mode[@]}"; do
+  dir_mounts+=(-v "$p:$p:${mount_mode[$p]}")
+done
+rw_dirs=()
+for p in "${!mount_mode[@]}"; do
+  [[ "${mount_mode[$p]}" == rw ]] && rw_dirs+=("$p")
+done
+log "mounts: project $project_mode, ${#rw_dirs[@]} more read-write, $(( ${#mount_mode[@]} - ${#rw_dirs[@]} )) read-only"
+
+# Kept read-only on top of the writable mounts:
+#  * the host-side Claude config (settings with its hooks, skills, agents),
+#    or a session could plant a hook that runs unsandboxed on the host
+#  * the .obsidian folder of any Obsidian vault mounted writable: community
+#    plugins installed there would run in Obsidian on the host
+protect_mounts=()
+for p in "$HOME/.claude/settings.json" "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/CLAUDE.md"; do
+  [[ -e "$p" ]] && protect_mounts+=(-v "$p:$p:ro")
+done
+for d in "$project_root" "${rw_dirs[@]}"; do
+  [[ -d "$d/.obsidian" && -z "${mount_mode[$d/.obsidian]:-}" ]] && protect_mounts+=(-v "$d/.obsidian:$d/.obsidian:ro")
+done
+
+# Host variables passed in: CLAUDE_SANDBOX_PASS_ENV, space-separated name
+# globs (e.g. set by the system config for tools used inside the sandbox)
+env_pass=()
+read -ra pass_globs <<< "${CLAUDE_SANDBOX_PASS_ENV:-}"
+if [[ ${#pass_globs[@]} -gt 0 ]]; then
+  while IFS= read -r v; do
+    for g in "${pass_globs[@]}"; do
+      # shellcheck disable=SC2053 # a glob match on purpose
+      if [[ "$v" == $g ]]; then
+        env_pass+=(-e "$v=${!v}")
+        break
+      fi
+    done
+  done < <(compgen -e)
+fi
+
+# Only ask podman for a TTY when there is one, so headless runs (claude -p
+# from a script) work too
+tty_flags=(-i)
+[[ -t 0 && -t 1 ]] && tty_flags=(-it)
+
+# Git: the host's global config (a /nix/store file, with its per-remote
+# identity includes), so commits made here carry the right author. Signing is
+# off: the sandbox has no SSH agent, and no allowed-signers file to show
+# signatures with; sign the commits on the host afterwards.
+log "starting claude in $pod_name-claude (pulls its image on first use)"
+claude_started=1
+systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
+podman run --rm "${tty_flags[@]}" \
   --name "$pod_name-claude" \
   --pod "$pod_name" \
   "${name_labels[@]}" \
@@ -342,24 +622,31 @@ podman run --rm -it \
   --privileged \
   --pull=missing \
   -v /nix/store:/nix/store:ro \
+  -v "$project_root:$project_root:$project_mode" \
   "${dir_mounts[@]}" \
-  -v "$project_root:$project_root:rw" \
   -w "$PWD" \
   -v "$asdf_data_dir:$asdf_data_dir:ro" \
   -v "$HOME/.claude:$HOME/.claude:rw" \
   -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
   "${mounts[@]}" \
+  "${protect_mounts[@]}" \
   "${dbus_mounts[@]}" \
   -e HOME="$HOME" \
   -e ASDF_DATA_DIR="$asdf_data_dir" \
   -e SSL_CERT_FILE="$CACERT_BUNDLE" \
-  -e GIT_CONFIG_COUNT=1 \
+  -e GIT_CONFIG_GLOBAL="$GIT_GLOBAL_CONFIG" \
+  -e GIT_CONFIG_COUNT=3 \
   -e GIT_CONFIG_KEY_0=core.excludesFile \
   -e GIT_CONFIG_VALUE_0="$GIT_GLOBAL_IGNORE" \
+  -e GIT_CONFIG_KEY_1=commit.gpgSign \
+  -e GIT_CONFIG_VALUE_1=false \
+  -e GIT_CONFIG_KEY_2=log.showSignature \
+  -e GIT_CONFIG_VALUE_2=false \
   -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \
-  docker.io/library/debian:stable-slim \
-  "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${add_dir_flags[@]}" "${mcp_flags[@]}" "$@"
+  "${env_pass[@]}" \
+  "$CLAUDE_SANDBOX_IMAGE" \
+  "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${mcp_flags[@]}" "$@"
 code=$?
 exit "$code"

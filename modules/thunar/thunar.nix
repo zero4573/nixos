@@ -11,7 +11,7 @@
   };
 
   # Thunar theming
-  flake.homeModules.thunar = { pkgs, ... }: {
+  flake.homeModules.thunar = { config, pkgs, lib, ... }: {
     gtk = {
       enable = true;
 
@@ -49,6 +49,18 @@
       "automount-drives/enabled" = true;
       "automount-media/enabled" = true;
     };
+
+    # Adds ~/Documents to the Places side pane. Thunar reads its bookmarks
+    # from gtk-3.0/bookmarks; the file is appended to rather than managed by
+    # gtk.gtk3.bookmarks so bookmarks added from Thunar itself keep working.
+    home.activation.thunarDocumentsBookmark = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      bookmarks="${config.xdg.configHome}/gtk-3.0/bookmarks"
+      entry="file://${config.home.homeDirectory}/Documents"
+      run mkdir -p "$(dirname "$bookmarks")" "${config.home.homeDirectory}/Documents"
+      if ! grep -q "^$entry\( \|$\)" "$bookmarks" 2>/dev/null; then
+        echo "$entry" >> "$bookmarks"
+      fi
+    '';
 
     # Hack to setup alacritty as the terminal when running "Open Terminal Here"
     xdg.dataFile."applications/xfce4-terminal.desktop".text = ''

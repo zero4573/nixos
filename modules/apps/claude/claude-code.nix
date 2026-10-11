@@ -14,7 +14,10 @@ _: {
       cwd="$(${lib.getExe pkgs.jq} -r '.cwd // empty' <<<"$input" 2>/dev/null || true)"
       message="$(${lib.getExe pkgs.jq} -r --arg d "$default_message" '.message // $d' <<<"$input" 2>/dev/null || echo "$default_message")"
       title="Claude Code"
-      [[ -n "$cwd" ]] && title="Claude Code ($(basename "$cwd"))"
+      # The session's folder (a ticket workspace is named after its ticket)
+      if [[ -n "$cwd" ]]; then
+        title="Claude Code ($(basename "$cwd"))"
+      fi
       ${lib.getExe' pkgs.libnotify "notify-send"} -a "Claude Code" "$title" "$message" || true
     '';
 
@@ -25,33 +28,51 @@ _: {
       useAutoModeDuringPlan = true;
       notifications = true;
       autoUpdate = false;
+      # Transcripts are what `claude --continue` resumes (e.g. a ticket
+      # session restarted by `ct start`); keep them longer than the 30-day
+      # default
+      cleanupPeriodDays = 90;
       systemPrompt = "if AGENTS.md exists, read it as CLAUDE.md.  Ensure that both AGENTS.md, and README.md (if it exists), are always kept up to date when a prompt changes a project";
-      bash = {
-        deniedCommands = [
-          "rm -rf"
-          "git push"
-          "DROP TABLE"
-          "truncate"
-          "nixos-install"
+      # Ticket and kb sessions add stricter rules (no worktree removal, ...)
+      # in their own .claude/settings.json (modules/apps/claude-tickets.nix).
+      permissions = {
+        deny = [
+          "Bash(rm -rf:*)"
+          "Bash(git push:*)"
+          "Bash(*DROP TABLE*)"
+          "Bash(truncate:*)"
+          "Bash(nixos-install:*)"
+          # Atlassian Rovo MCP tools that consume Rovo credits (unified search,
+          # Teamwork Graph; overage billed by default from 2026-12-03). Every
+          # sandboxed session gets sandbox-proxy's `atlassian` server, and the
+          # free single-product tools cover what the skills need.
+          "mcp__atlassian__search"
+          "mcp__atlassian__getGraphContext"
+          "mcp__atlassian__getGraphObject"
+          "mcp__atlassian__addGraphContext"
+          "mcp__atlassian__getTeamworkGraphContext"
         ];
-        allowedCommands = [
-          "npm test"
-          "npm run lint"
-          "git status"
-          "git diff"
-          "ls"
-          "cat"
-          "echo"
+        allow = [
+          "Bash(npm test:*)"
+          "Bash(npm run lint:*)"
+          "Bash(git status:*)"
+          "Bash(git diff:*)"
+          "Bash(ls:*)"
+          "Bash(cat:*)"
+          "Bash(echo:*)"
         ];
       };
-      hooks = {
-        Notification = [
-          { matcher = ""; hooks = [ { type = "command"; command = "${notifyScript}"; } ]; }
-        ];
-        Stop = [
-          { matcher = ""; hooks = [ { type = "command"; command = ''${notifyScript} "Finished responding"''; } ]; }
-        ];
-      };
+      hooks =
+        let
+          cmd = command: { type = "command"; inherit command; };
+        in {
+          Notification = [
+            { matcher = ""; hooks = [ (cmd "${notifyScript}") ]; }
+          ];
+          Stop = [
+            { matcher = ""; hooks = [ (cmd ''${notifyScript} "Finished responding"'') ]; }
+          ];
+        };
     };
     settingsFile = pkgs.writeText "claude-code-settings.json" (builtins.toJSON settings);
 
@@ -59,6 +80,11 @@ _: {
     # each holding a SKILL.md (see modules/apps/claude/skills/README.md). Copied
     # wholesale into ~/.claude/skills/.
     skillsSource = ./skills;
+
+    # Subagent definitions (one .md per agent under ./agents, see
+    # ./agents/README.md). Copied into ~/.claude/agents/, which is fully
+    # Nix-owned like ~/.claude/skills.
+    agentsSource = ./agents;
 
     # Skills pulled from external git repos, e.g.:
     #   {
@@ -158,6 +184,16 @@ _: {
       run cp -r ${skillsSource}/. "$HOME/.claude/skills/"
       ${skillCopyCommands}
       run chmod -R u+rwX "$HOME/.claude/skills"
+    '';
+
+    # ~/.claude/agents is fully Nix-owned: wiped and repopulated from
+    # agentsSource on every switch
+    home.activation.claudeCodeAgents = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      run rm -rf "$HOME/.claude/agents"
+      run mkdir -p "$HOME/.claude/agents"
+      run cp -r ${agentsSource}/. "$HOME/.claude/agents/"
+      run rm -f "$HOME/.claude/agents/README.md"
+      run chmod -R u+rwX "$HOME/.claude/agents"
     '';
 
     # Must run after claudeCodeSkills, which wipes ~/.claude/skills

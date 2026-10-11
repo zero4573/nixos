@@ -19,7 +19,7 @@
         imports = [
           self.homeModules.desktopHome
           self.homeModules.noctalia
-          self.homeModules.obsidian
+          inputs.claude-tickets.homeModules.obsidianVaults
           self.homeModules.vicinaeConfig
           self.homeModules.terminals
           self.homeModules.browsers
@@ -34,6 +34,8 @@
           self.homeModules.npmSandbox
           self.homeModules.sandboxProxy
           self.homeModules.aiSandboxSlice
+          inputs.claude-tickets.homeModules.claudeTickets
+          self.homeModules.claudeTicketsSetup
         ];
       };
     };

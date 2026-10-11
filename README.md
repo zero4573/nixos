@@ -121,3 +121,7 @@ nix flake update <input>                 # bump a single input, e.g. nixpkgs
 See [`AGENTS.md`](./AGENTS.md) for the full module/directory conventions this flake follows
 (dendritic pattern, `hostConfig.*` options namespace, profile composition, gotchas around
 vicinae/podman/disko, etc.).
+
+The Claude ticket workflow and its Obsidian knowledge base live in their own repo,
+claude-tickets (a flake input, see its README); `modules/apps/claude-tickets.nix` sets it up
+here, on top of the sandboxed `claude` (`modules/apps/claude/claude-sandbox.nix`).

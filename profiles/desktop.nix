@@ -1,4 +1,4 @@
-{ self, ... }: {
+{ self, inputs, ... }: {
   flake.nixosModules.desktopProfile = { pkgs, ... }: {
     imports = [
       self.nixosModules.commonConfigs
@@ -19,7 +19,7 @@
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.joplin
-      self.nixosModules.obsidian
+      inputs.claude-tickets.nixosModules.obsidian
       self.nixosModules.sublimeMerge
       self.nixosModules.calibre
       self.nixosModules.screenshot

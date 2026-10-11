@@ -75,6 +75,9 @@ _: {
           source "${pkgs.asdf-vm}/etc/profile.d/asdf-prepare.sh"
           [ -f "$HOME/.alias" ] && source "$HOME/.alias"
           [ -f "$HOME/.custom" ] && source "$HOME/.custom"
+
+          # Grey start time + duration for every command.
+          source ${./cmd-timing.zsh}
         ''
 
         # p10k's own convention is to source ~/.p10k.zsh last, after the theme
