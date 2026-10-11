@@ -14,7 +14,7 @@ let
   # see programs.niri.extraBinds in hosts/options.nix.
   mkNiriSettings = { pkgs, lib, system, extraBinds ? { } }:
   let
-    vicinae = "${inputs.vicinae.packages.${system}.default}/bin/vicinae";
+    vicinae = lib.getExe pkgs.vicinae;
     noctaliaBin = lib.getExe pkgs.noctalia-shell;
 
     # Workspace focus / move-to bindings for workspaces 1..9, matching

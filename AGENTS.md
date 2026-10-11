@@ -95,8 +95,6 @@ explicit confirmation of the target device).
 
 ## Gotchas
 
-- `inputs.vicinae` must **not** get `inputs.nixpkgs.follows` — it has its own cachix
-  binary cache; following breaks it and forces a from-source rebuild (including Qt).
 - podman: `dockerCompat` gives a `docker` alias — never add `pkgs.docker` alongside it.
 - disko owns root/boot filesystems on the framework hosts — hardware modules for
   those hosts must not also declare `fileSystems."/"` etc.

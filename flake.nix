@@ -1,13 +1,6 @@
 {
   description = "Main nix project for setting up my environments";
 
-  nixConfig = {
-    extra-substituters = [ "https://vicinae.cachix.org" ];
-    extra-trusted-public-keys = [
-      "vicinae.cachix.org-1:1kDrfienkGHPYbkpNj1mWTr7Fm1+zcenzgTizIcI3oc="
-    ];
-  };
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
@@ -26,10 +19,6 @@
     };
 
     nix-flatpak.url = "github:gmodena/nix-flatpak";
-
-    # NOTE: vicinae ships its own cachix binary cache. Do NOT make it follow
-    # our nixpkgs or we lose the cache and rebuild it (and Qt) from source.
-    vicinae.url = "github:vicinaehq/vicinae";
 
     # The ticket workflow (commands, Claude Code plugin, Obsidian vault setup),
     # its own repo. See modules/apps/claude-tickets.nix. To try local changes
