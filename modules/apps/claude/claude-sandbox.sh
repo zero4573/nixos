@@ -611,6 +611,11 @@ tty_flags=(-i)
 # identity includes), so commits made here carry the right author. Signing is
 # off: the sandbox has no SSH agent, and no allowed-signers file to show
 # signatures with; sign the commits on the host afterwards.
+#
+# Nested podman's storage gets an anonymous volume (removed with the
+# container): on the container's own overlayfs root, overlay mounts in it
+# (e.g. podman run --rootfs <dir>:O) fail, an overlay upperdir can't be on
+# overlayfs.
 log "starting claude in $pod_name-claude (pulls its image on first use)"
 claude_started=1
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
@@ -622,6 +627,7 @@ podman run --rm "${tty_flags[@]}" \
   --privileged \
   --pull=missing \
   -v /nix/store:/nix/store:ro \
+  -v /var/lib/containers \
   -v "$project_root:$project_root:$project_mode" \
   "${dir_mounts[@]}" \
   -w "$PWD" \
