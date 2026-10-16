@@ -104,12 +104,22 @@ _: {
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
-    # Basic developer tools for use inside the sandbox, plus whatever other
+    # Basic Linux and developer tools for use inside the sandbox (the slim
+    # Debian image has little beyond coreutils/grep/sed), plus whatever other
     # modules add through programs.claudeSandbox.extraPackages (e.g. the
-    # claude-tickets tools, see modules/apps/claude-tickets.nix)
+    # claude-tickets tools, see modules/apps/claude-tickets.nix). They come
+    # before the image's /usr/bin on PATH, so they shadow its own copies.
     devToolsEnv = pkgs.buildEnv {
       name = "claude-sandbox-dev-tools";
-      paths = [ pkgs.git ] ++ cfg.extraPackages;
+      paths = with pkgs; [
+        git
+        coreutils findutils diffutils gnugrep gnused gawk patch less file
+        which tree ripgrep fd jq yq-go bc
+        gnutar gzip bzip2 xz zstd zip unzip
+        procps psmisc util-linux lsof strace
+        curl wget iproute2 netcat-openbsd dnsutils rsync
+        gnumake
+      ] ++ cfg.extraPackages;
     };
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
