@@ -9,7 +9,8 @@
   #       mount read-write, Edit/Write deny rules inside them read-only).
   #       Sandbox-only settings are environment variables (CLAUDE_SANDBOX_*:
   #       ports, pod name, quiet launch, no graphify, host variables to pass
-  #       in); `claude-sandbox --help` lists them. Tools run through claude
+  #       in, read-only host paths: programs.claudeSandbox.readOnlyPaths);
+  #       `claude-sandbox --help` lists them. Tools run through claude
   #       don't need to know they're sandboxed.
   #  * claude-sandbox - the same command, kept as an alias; its --help
   #       describes the sandbox rather than claude.
@@ -146,6 +147,7 @@
       text = ''
         export CLAUDE_SANDBOX_AS=${name}
         export CLAUDE_SANDBOX_PASS_ENV="''${CLAUDE_SANDBOX_PASS_ENV:-${lib.concatStringsSep " " cfg.passEnv}}"
+        export CLAUDE_SANDBOX_RO_PATHS="''${CLAUDE_SANDBOX_RO_PATHS:-${lib.concatStringsSep ":" cfg.readOnlyPaths}}"
         export CLAUDE_CODE=${cfg.package}
         export CLAUDE_SANDBOX_IMAGE=${lib.escapeShellArg cfg.image}
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
@@ -245,6 +247,16 @@
       default = [ ];
       example = [ "CLAUDE_TICKETS_*" ];
       description = "Names (globs) of host environment variables passed into the sandbox.";
+    };
+
+    # Host paths every session gets read-only at the same path (also when
+    # the session didn't pass them as --add-dir), e.g. a cache a tool reads;
+    # built into the launcher, CLAUDE_SANDBOX_RO_PATHS (colon-separated) wins
+    options.programs.claudeSandbox.readOnlyPaths = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "~/.cache/some-tool/models" ];
+      description = "Host paths mounted read-only in every sandbox session; ~ and $HOME are expanded at launch, missing paths skipped.";
     };
 
     options.programs.claudeSandbox.extraPackages = lib.mkOption {
