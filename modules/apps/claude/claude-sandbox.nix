@@ -141,10 +141,15 @@
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
     # describes the sandbox)
+    # CLAUDE_SANDBOX_RO_PATHS is colon-separated, so no entry may contain one
+    assertColonFree = lib.assertMsg
+      (lib.all (p: !(lib.hasInfix ":" p)) cfg.readOnlyPaths)
+      "programs.claudeSandbox.readOnlyPaths: no entry may contain ':'";
     sandboxLauncher = name: pkgs.writeShellApplication {
       inherit name;
       runtimeInputs = [ pkgs.podman pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq pkgs.git pkgs.gnused ];
       text = ''
+        ${lib.optionalString assertColonFree ""}
         export CLAUDE_SANDBOX_AS=${name}
         export CLAUDE_SANDBOX_PASS_ENV="''${CLAUDE_SANDBOX_PASS_ENV:-${lib.concatStringsSep " " cfg.passEnv}}"
         export CLAUDE_SANDBOX_RO_PATHS="''${CLAUDE_SANDBOX_RO_PATHS:-${lib.concatStringsSep ":" cfg.readOnlyPaths}}"

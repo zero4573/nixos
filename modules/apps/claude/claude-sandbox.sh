@@ -79,7 +79,10 @@ Sandbox settings (environment):
                                    claudeSandbox.readOnlyPaths); ~ and $HOME
                                    are expanded, a missing path is skipped,
                                    and one inside a read-write directory
-                                   stays read-only
+                                   stays read-only; one containing the
+                                   project or an --add-dir is skipped with
+                                   a warning. Set in the host env, it
+                                   replaces the configured list
 
 If the current directory is a git checkout, it is fetched and fast-forwarded
 to its upstream before launch; diverged branches or local changes in the
@@ -616,9 +619,21 @@ for p in "${extra_ro[@]}"; do
     "~"|"~/"*) p="$HOME${p#\~}" ;;
     '$HOME'|'$HOME/'*) p="$HOME${p#\$HOME}" ;;
   esac
-  [[ -e "$p" ]] || continue
-  p="$(realpath "$p")"
-  if [[ "$p" == "$project_abs" ]]; then project_mode=ro; else mount_mode[$p]=ro; fi
+  if [[ ! -e "$p" ]]; then
+    log "read-only path $p is missing, skipping it"
+    continue
+  fi
+  p="$(realpath "$p")" || continue
+  [[ -n "$p" ]] || continue
+  skip=
+  for r in "${rw_paths[@]}"; do
+    if [[ "$r" == "$p" || "$r" == "${p%/}"/* ]]; then skip=$r; break; fi
+  done
+  if [[ -n "$skip" ]]; then
+    warn "read-only path $p contains the read-write directory $skip, not mounting it read-only"
+    continue
+  fi
+  mount_mode[$p]=ro
 done
 
 # A git directory given read-write on its own (e.g. a main clone's .git, so
