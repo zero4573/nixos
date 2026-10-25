@@ -34,11 +34,18 @@
   #  knowledge graph of the project (local tree-sitter AST, no LLM), keeps it
   #  updated, and serves it as the `graphify` MCP server on the pod's
   #  localhost; the graph lives in ./graphify-out (globally git-ignored, see
-  #  modules/apps/git.nix). A session that brings its own graphify server
-  #  (--mcp-config) skips it. Every session also gets the stdio MCP servers
-  #  in programs.claudeSandbox.extraMcpServers: by default `fff` (fff-mcp,
-  #  fast file and content search, from the fff flake input). The sandbox's
-  #  PATH gets programs.claudeSandbox.extraPackages. The containers run under the
+  #  modules/apps/git.nix). Each --add-dir codebase (one with parseable code,
+  #  not overlapping the project) is graphed into its own graphify-out too,
+  #  and the sidecar then serves all of them merged into one graph (node ids
+  #  prefixed per directory, re-merged as they change; they build in the
+  #  background, so a large one never delays startup). A session that
+  #  brings its own graphify server (--mcp-config) skips it. Either way, a
+  #  session with a graphify server gets GRAPHIFY_MCP=1, which
+  #  claude-code.nix's SessionStart hook turns into an instruction to use the
+  #  graph tools first. Every session also gets the stdio MCP servers in
+  #  programs.claudeSandbox.extraMcpServers: by default `fff` (fff-mcp, fast
+  #  file and content search, from the fff flake input). The sandbox's PATH
+  #  gets programs.claudeSandbox.extraPackages. The containers run under the
   #  `aisandbox.slice` systemd user slice (see modules/apps/ai-sandbox-slice.nix)
   #  so they fair-share CPU/IO/memory with the rest of the desktop session.
   #  Each launch step is timestamped on stderr and logged to
