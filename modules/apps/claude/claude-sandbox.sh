@@ -38,6 +38,8 @@ warn() {
 #   CLAUDE_SANDBOX_NO_GRAPHIFY=1  no graphify sidecar for this session
 #   CLAUDE_SANDBOX_PASS_ENV     space-separated globs of host environment
 #                               variables to pass in, e.g. "CLAUDE_TICKETS_*"
+#   CLAUDE_SANDBOX_RO_PATHS     colon-separated host paths to mount read-only
+#                               in every session (~ and $HOME expanded)
 if [[ "${CLAUDE_SANDBOX_AS:-}" == claude-sandbox && "${1:-}" =~ ^(-h|--help)$ ]]; then
   cat <<'EOF'
 Usage: claude [claude args...]        (claude-sandbox is the same command)
@@ -72,6 +74,12 @@ Sandbox settings (environment):
                                    the project and every --add-dir
                                    codebase into one merged graph
   CLAUDE_SANDBOX_PASS_ENV="A_* B"  host variables to pass in (name globs)
+  CLAUDE_SANDBOX_RO_PATHS=/a:~/b   host paths mounted read-only at the same
+                                   path in every session (programs.
+                                   claudeSandbox.readOnlyPaths); ~ and $HOME
+                                   are expanded, a missing path is skipped,
+                                   and one inside a read-write directory
+                                   stays read-only
 
 If the current directory is a git checkout, it is fetched and fast-forwarded
 to its upstream before launch; diverged branches or local changes in the
@@ -595,6 +603,22 @@ for p in "${ro_paths[@]}"; do
   else
     mount_mode[$p]=ro
   fi
+done
+
+# Paths every session may read but not change (CLAUDE_SANDBOX_RO_PATHS, from
+# programs.claudeSandbox.readOnlyPaths), e.g. a model cache: mounted read-only
+# at the same path, also when inside a read-write directory; missing ones are
+# skipped
+IFS=: read -ra extra_ro <<< "${CLAUDE_SANDBOX_RO_PATHS:-}"
+for p in "${extra_ro[@]}"; do
+  [[ -n "$p" ]] || continue
+  case "$p" in
+    "~"|"~/"*) p="$HOME${p#\~}" ;;
+    '$HOME'|'$HOME/'*) p="$HOME${p#\$HOME}" ;;
+  esac
+  [[ -e "$p" ]] || continue
+  p="$(realpath "$p")"
+  if [[ "$p" == "$project_abs" ]]; then project_mode=ro; else mount_mode[$p]=ro; fi
 done
 
 # A git directory given read-write on its own (e.g. a main clone's .git, so

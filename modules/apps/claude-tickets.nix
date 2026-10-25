@@ -12,6 +12,9 @@ _: {
   #    from here
   #  * the tools sessions run (`ct ws`, `ct new`, ...) are on the
   #    sandbox's PATH, and CLAUDE_TICKETS_* variables reach them
+  #  * ct's embedding model cache (~/.cache/claude-tickets/models) is mounted
+  #    read-only in every sandboxed session (programs.claudeSandbox.
+  #    readOnlyPaths), so `ct vault search` finds its models
   #  * your session rules (sessionSettings below): what ticket and kb
   #    sessions may never do, on top of claude-tickets' own (main clones
   #    read-only)
@@ -58,5 +61,6 @@ _: {
     # they need (e.g. the vault a `ct claude` session works on)
     programs.claudeSandbox.extraPackages = config.programs.claude-tickets.sessionTools;
     programs.claudeSandbox.passEnv = [ "CLAUDE_TICKETS_*" ];
+    programs.claudeSandbox.readOnlyPaths = [ "~/.cache/claude-tickets/models" ];
   };
 }
