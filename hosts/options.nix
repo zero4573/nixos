@@ -59,6 +59,17 @@
         description = "System time zone.";
       };
 
+      wifiInterface = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "wlp192s0";
+        description = ''
+          Wi-Fi interface whose traffic the noctalia bar's download/upload
+          meters show. Empty sums every non-loopback interface (which also
+          counts libvirt bridge/tap traffic).
+        '';
+      };
+
       defaultLocale = lib.mkOption {
         type = lib.types.str;
         default = "en_CA.UTF-8";

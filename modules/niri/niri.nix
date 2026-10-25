@@ -15,7 +15,7 @@ let
   mkNiriSettings = { pkgs, lib, system, extraBinds ? { } }:
   let
     vicinae = lib.getExe pkgs.vicinae;
-    noctaliaBin = lib.getExe pkgs.noctalia-shell;
+    noctaliaBin = lib.getExe pkgs.noctalia;
 
     # Workspace focus / move-to bindings for workspaces 1..9, matching
     # CachyOS's niri keybinds (Mod+N focus, Mod+Ctrl+N move-to).
@@ -129,15 +129,15 @@ let
       };
       "Super+S" = _: {
         props.hotkey-overlay-title = "Open Control Center: noctalia";
-        content.spawn-sh = "${noctaliaBin} ipc call controlCenter toggle";
+        content.spawn-sh = "${noctaliaBin} msg panel-toggle control-center";
       };
       "Super+Shift+L" = _: {
         props.hotkey-overlay-title = "Lock Screen: noctalia";
-        content.spawn-sh = "${noctaliaBin} ipc call lockScreen lock";
+        content.spawn-sh = "${noctaliaBin} msg session lock";
       };
       "Super+X" = _: {
         props.hotkey-overlay-title = "Session Menu: noctalia";
-        content.spawn-sh = "${noctaliaBin} ipc call sessionMenu toggle";
+        content.spawn-sh = "${noctaliaBin} msg panel-toggle session";
       };
       "Super+E" = _: {
         props.hotkey-overlay-title = "File Manager: Thunar";
@@ -151,45 +151,45 @@ let
       # -- Media controls --
       "XF86AudioRaiseVolume" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call volume increase";
+        content.spawn-sh = "${noctaliaBin} msg volume-up";
       };
       "XF86AudioLowerVolume" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call volume decrease";
+        content.spawn-sh = "${noctaliaBin} msg volume-down";
       };
       "XF86AudioMute" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call volume muteOutput";
+        content.spawn-sh = "${noctaliaBin} msg volume-mute";
       };
       "XF86AudioMicMute" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call volume muteInput";
+        content.spawn-sh = "${noctaliaBin} msg mic-mute";
       };
       "XF86AudioNext" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call media next";
+        content.spawn-sh = "${noctaliaBin} msg media next";
       };
       "XF86AudioPrev" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call media previous";
+        content.spawn-sh = "${noctaliaBin} msg media previous";
       };
       "XF86AudioPlay" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call media playPause";
+        content.spawn-sh = "${noctaliaBin} msg media toggle";
       };
       "XF86AudioPause" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call media playPause";
+        content.spawn-sh = "${noctaliaBin} msg media toggle";
       };
 
       # -- Brightness controls --
       "XF86MonBrightnessUp" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call brightness increase";
+        content.spawn-sh = "${noctaliaBin} msg brightness-up";
       };
       "XF86MonBrightnessDown" = _: {
         props.allow-when-locked = true;
-        content.spawn-sh = "${noctaliaBin} ipc call brightness decrease";
+        content.spawn-sh = "${noctaliaBin} msg brightness-down";
       };
 
       # -- Window movement and focus --

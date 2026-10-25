@@ -8,6 +8,7 @@ _: {
       user.name = "ato";
       user.description = "ato";
       profile = "work";
+      wifiInterface = "wlp192s0";
 
       git.userName = "Andy To";
       git.userEmail = "ato@streamsix.com";
