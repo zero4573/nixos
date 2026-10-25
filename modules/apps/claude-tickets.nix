@@ -14,7 +14,9 @@ _: {
   #    sandbox's PATH, and CLAUDE_TICKETS_* variables reach them
   #  * ct's embedding model cache ($XDG_CACHE_HOME/claude-tickets/models) is mounted
   #    read-only in every sandboxed session (programs.claudeSandbox.
-  #    readOnlyPaths), so `ct vault search` finds its models
+  #    readOnlyPaths), so `ct vault search` finds its models; they are
+  #    fetched on the host first (`ct vault model fetch`), a missing
+  #    cache is skipped with a log line
   #  * your session rules (sessionSettings below): what ticket and kb
   #    sessions may never do, on top of claude-tickets' own (main clones
   #    read-only)
