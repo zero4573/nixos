@@ -126,6 +126,7 @@
       zip
       unzip
       jq
+      ripgrep
       tree
       gnumake
       bind
