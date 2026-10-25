@@ -28,6 +28,14 @@
       url = "github:zero4573/claude-tickets";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # fff: fast file and content search, served to every sandboxed Claude
+    # session as the `fff` MCP server (its fff-mcp package). See
+    # modules/apps/claude/claude-sandbox.nix (extraMcpServers).
+    fff = {
+      url = "github:dmtrKovalenko/fff";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs: inputs.flake-parts.lib.mkFlake

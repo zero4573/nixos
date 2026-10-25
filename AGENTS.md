@@ -26,7 +26,7 @@ profiles/{desktop,work,personal,vm-guest}.nix   composition layer over modules/
 modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
 modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
 modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, ...)
-modules/apps/claude/            claude-code (settings, hooks, skills/, agents/), claude-sandbox: `claude` sandboxed by default, `claude-open` plain (+ sidecar/setup scripts)
+modules/apps/claude/            claude-code (settings, hooks, skills/, agents/), claude-sandbox: `claude` sandboxed by default, `claude-open` plain (+ sidecar/setup scripts; every sandboxed session gets the graphify sidecar and `extraMcpServers`, e.g. fff)
 modules/apps/npm-sandbox/       npm-sandbox.nix + its script
 modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy
 modules/apps/claude-tickets.nix wires the claude-tickets flake input (ticket workflow + Obsidian vaults, its own repo) to this machine: sandbox, sandbox-proxy MCP, session rules

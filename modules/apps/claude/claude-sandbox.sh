@@ -422,13 +422,21 @@ if [[ "$graphify_enabled" == 1 ]]; then
   fi
 fi
 
+# Stdio MCP servers every session gets (programs.claudeSandbox.extraMcpServers,
+# e.g. fff), from a config file in the store
+extra_mcp_config=""
+if [[ -n "${EXTRA_MCP_CONFIG:-}" ]]; then
+  extra_mcp_config="$(cat "$EXTRA_MCP_CONFIG")"
+  log "extra MCP servers: $(jq -r '.mcpServers | keys | join(", ")' <<< "$extra_mcp_config" 2>/dev/null)"
+fi
+
 # All MCP servers go into one file passed as --mcp-config=<file>: the flag
 # is variadic, so a separate value would swallow a following positional
 # prompt as another config file. claude merges it with any --mcp-config of
 # the caller.
 mcp_flags=()
-if [[ -n "$proxy_mcp_config$graphify_mcp_config" ]]; then
-  printf '%s\n' "$proxy_mcp_config" "$graphify_mcp_config" \
+if [[ -n "$proxy_mcp_config$graphify_mcp_config$extra_mcp_config" ]]; then
+  printf '%s\n' "$proxy_mcp_config" "$graphify_mcp_config" "$extra_mcp_config" \
     | jq -s '{mcpServers: (map(select(. != null) | .mcpServers) | add)}' > "$tmp_dir/mcp.json"
   mounts+=(-v "$tmp_dir/mcp.json:$tmp_dir/mcp.json:ro")
   mcp_flags+=("--mcp-config=$tmp_dir/mcp.json")

@@ -1,4 +1,4 @@
-_: {
+{ inputs, ... }: {
   # Claude Code, sandboxed by default:
   #
   #  * claude - Claude Code in a sandbox (claude-sandbox.sh): a privileged
@@ -35,8 +35,10 @@ _: {
   #  updated, and serves it as the `graphify` MCP server on the pod's
   #  localhost; the graph lives in ./graphify-out (globally git-ignored, see
   #  modules/apps/git.nix). A session that brings its own graphify server
-  #  (--mcp-config) skips it. The sandbox's PATH gets
-  #  programs.claudeSandbox.extraPackages. The containers run under the
+  #  (--mcp-config) skips it. Every session also gets the stdio MCP servers
+  #  in programs.claudeSandbox.extraMcpServers: by default `fff` (fff-mcp,
+  #  fast file and content search, from the fff flake input). The sandbox's
+  #  PATH gets programs.claudeSandbox.extraPackages. The containers run under the
   #  `aisandbox.slice` systemd user slice (see modules/apps/ai-sandbox-slice.nix)
   #  so they fair-share CPU/IO/memory with the rest of the desktop session.
   #  Each launch step is timestamped on stderr and logged to
@@ -122,6 +124,13 @@ _: {
       ] ++ cfg.extraPackages;
     };
 
+    # programs.claudeSandbox.extraMcpServers as an MCP config file in the
+    # store (reached through the read-only /nix/store mount); the launcher
+    # merges it with sandbox-proxy's and graphify's servers
+    extraMcpConfig = lib.optionalString (cfg.extraMcpServers != { })
+      (toString (pkgs.writeText "claude-sandbox-extra-mcp.json"
+        (builtins.toJSON { mcpServers = cfg.extraMcpServers; })));
+
     # One launcher, installed as claude and as claude-sandbox (whose --help
     # describes the sandbox)
     sandboxLauncher = name: pkgs.writeShellApplication {
@@ -140,6 +149,7 @@ _: {
         export GRAPHIFY_IMAGE=${lib.escapeShellArg graphifyImage}
         export GRAPHIFY_LOCK=${graphifyLock}
         export GRAPHIFY_INSTALL=${graphifyInstallScript}
+        export EXTRA_MCP_CONFIG=${lib.escapeShellArg extraMcpConfig}
         export CLAUDE_GIT_UPDATE=${gitUpdate}
         export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
         export GIT_GLOBAL_CONFIG=${config.xdg.configFile."git/config".source}
@@ -234,6 +244,27 @@ _: {
       type = lib.types.listOf lib.types.package;
       default = [ ];
       description = "Packages whose bin/ is put on PATH inside claude-sandbox (reached through the read-only /nix/store mount).";
+    };
+
+    # MCP servers every sandboxed session gets, next to sandbox-proxy's and
+    # the graphify sidecar's: Claude Code mcpServers entries by server name.
+    # Their commands run inside the sandbox, so they must be /nix/store paths
+    # (or tools on its PATH).
+    options.programs.claudeSandbox.extraMcpServers = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+      default = { };
+      example = lib.literalExpression ''
+        { foo = { command = lib.getExe pkgs.foo-mcp; args = [ "--stdio" ]; }; }
+      '';
+      description = "Extra stdio MCP servers (Claude Code mcpServers entries, by name) for every claude-sandbox session.";
+    };
+
+    # fff-mcp (tools find_files, grep, multi_grep), indexing the session's
+    # working directory. Pinned by the fff flake input (flake.lock), so its
+    # own update check is off.
+    config.programs.claudeSandbox.extraMcpServers.fff = {
+      command = lib.getExe' inputs.fff.packages.${pkgs.stdenv.hostPlatform.system}.fff-mcp "fff-mcp";
+      args = [ "--no-update-check" ];
     };
 
     config.home.packages = [ (sandboxLauncher "claude") (sandboxLauncher "claude-sandbox") claudeOpen graphifyLockTool ];
