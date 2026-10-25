@@ -68,7 +68,9 @@ Sandbox settings (environment):
   CLAUDE_SANDBOX_QUIET=1           only print warnings while launching
   CLAUDE_SANDBOX_NO_GRAPHIFY=1     skip the graphify sidecar (it's also
                                    skipped when an --mcp-config already
-                                   defines a graphify server)
+                                   defines a graphify server); it graphs
+                                   the project and every --add-dir
+                                   codebase into one merged graph
   CLAUDE_SANDBOX_PASS_ENV="A_* B"  host variables to pass in (name globs)
 
 If the current directory is a git checkout, it is fetched and fast-forwarded
@@ -327,6 +329,10 @@ log "pod $pod_name"
 # (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
 # an MCP server.
 graphify_mcp_config=""
+# Set when the session ends up with a `graphify` MCP server (the sidecar's or
+# the caller's); passed in as GRAPHIFY_MCP=1 so Claude's SessionStart hook
+# (modules/apps/claude/claude-code.nix) steers it to the graph tools
+graphify_attached=0
 
 # Preflight: is there any source file graphify's code-only pass can parse,
 # in the same file set it would scan -- git's view (tracked + untracked,
@@ -336,11 +342,11 @@ graphify_mcp_config=""
 # graphifyVersion (minus .json, which on its own isn't worth a graph) --
 # refresh this list when bumping it.
 graphify_code_re='\.(F|F03|F08|F90|F95|asd|astro|bash|c|cbl|cc|cjs|cl|cls|cob|cobol|cpp|cpy|cs|cshtml|csproj|cts|cu|cuh|cxx|dart|dfm|dm|dme|dmf|dmi|dmm|dpk|dpr|ejs|erl|escript|ets|ex|exs|f|f03|f08|f90|f95|fsproj|go|gradle|groovy|h|hcl|hpp|hrl|inc|java|jl|js|jsx|kt|kts|lfm|lisp|lpk|lpr|lsp|lua|luau|m|metal|mjs|ml|mli|mm|mts|pas|php|pp|ps1|psd1|psm1|py|r|rake|razor|rb|resource|robot|rs|scala|sh|sln|slnx|sol|sql|sv|svelte|svh|swift|tf|tfvars|toc|trigger|ts|tsx|v|vb|vbproj|vue|xaml|zig)$'
-has_graphify_sources() {
-  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$project_root" ls-files -z --cached --others --exclude-standard -- . 2>/dev/null
+has_graphify_sources() {  # has_graphify_sources <dir>
+  if git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$1" ls-files -z --cached --others --exclude-standard -- . 2>/dev/null
   else
-    find "$project_root" -mindepth 1 \
+    find "$1" -mindepth 1 \
       \( -type d \( -name node_modules -o -name venv -o -name .venv -o -name __pycache__ \
         -o -name dist -o -name build -o -name target -o -name site-packages -o -name lib64 \
         -o -name graphify-out -o -name '*.egg-info' -o -name '.*' \) -prune \) \
@@ -356,21 +362,59 @@ if [[ "$graphify_enabled" == 1 ]]; then
     if jq -e '.mcpServers.graphify' >/dev/null 2>&1 <<< "$json"; then
       log "graphify: the session brings its own graphify server, skipping the sidecar"
       graphify_enabled=0
+      graphify_attached=1
       break
     fi
   done
 fi
 if [[ "$graphify_enabled" == 1 ]]; then
   log "graphify: looking for source files it can parse"
-  if ! has_graphify_sources; then
+  if ! has_graphify_sources "$project_root"; then
     log "graphify: no source files it can parse here, skipping the sidecar"
     graphify_enabled=0
+  fi
+fi
+
+# The --add-dir codebases get graphed too (merged with the project's into
+# the one graph the sidecar serves), each with parseable code and not
+# overlapping the project or another one already taken: a parent of the
+# project (say ~/Projects) would mean graphing everything under it
+graphify_extra_roots=()
+if [[ "$graphify_enabled" == 1 ]]; then
+  graphify_roots=("$(realpath -m "$project_root")")
+  for d in "${add_dirs[@]}"; do
+    [[ "$d" == "~"* ]] && d="$HOME${d#\~}"
+    [[ "$d" == /* ]] || d="$PWD/$d"
+    [[ -d "$d" && "$d" != *$'\n'* ]] || continue
+    d="$(realpath "$d")"
+    overlap=0
+    for r in "${graphify_roots[@]}"; do
+      if [[ "$d" == "$r" || "$d" == "$r"/* || "$r" == "$d"/* ]]; then
+        overlap=1
+        break
+      fi
+    done
+    if [[ "$overlap" == 1 ]]; then
+      log "graphify: --add-dir $d overlaps a directory already graphed, not graphing it"
+    elif ! has_graphify_sources "$d"; then
+      log "graphify: --add-dir $d has no source files it can parse, not graphing it"
+    else
+      graphify_roots+=("$d")
+      graphify_extra_roots+=("$d")
+    fi
+  done
+  if [[ ${#graphify_extra_roots[@]} -gt 0 ]]; then
+    log "graphify: also graphing ${graphify_extra_roots[*]}"
   fi
 fi
 
 if [[ "$graphify_enabled" == 1 ]]; then
   graphify_port=47100
   graphify_key="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
+  graphify_extra_mounts=()
+  for r in "${graphify_extra_roots[@]}"; do
+    graphify_extra_mounts+=(-v "$r:$r:rw")
+  done
   log "graphify: starting the sidecar (pulls its image on first use)"
   systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
   podman run -d --rm \
@@ -383,10 +427,12 @@ if [[ "$graphify_enabled" == 1 ]]; then
     -v "$GRAPHIFY_SIDECAR:/sidecar.sh:ro" \
     -v "$GRAPHIFY_INSTALL:/graphify-install.sh:ro" \
     -v "$project_root:$project_root:rw" \
+    "${graphify_extra_mounts[@]}" \
     -v "$GRAPHIFY_LOCK:/graphify-requirements.txt:ro" \
     -e GRAPHIFY_PORT="$graphify_port" \
     -e GRAPHIFY_API_KEY="$graphify_key" \
     -e PROJECT_ROOT="$project_root" \
+    -e EXTRA_ROOTS="$(printf '%s\n' "${graphify_extra_roots[@]}")" \
     -e GRAPHIFY_QUERY_LOG_DISABLE=1 \
     "$GRAPHIFY_IMAGE" \
     sh /sidecar.sh >/dev/null
@@ -414,6 +460,7 @@ if [[ "$graphify_enabled" == 1 ]]; then
 
   if [[ "$graphify_ready" == 1 ]]; then
     log "graphify: ready"
+    graphify_attached=1
     graphify_mcp_config="{\"mcpServers\":{\"graphify\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:$graphify_port/mcp\",\"headers\":{\"Authorization\":\"Bearer $graphify_key\"}}}}"
   else
     warn "graphify: the sidecar didn't come up, continuing without it:"
@@ -652,6 +699,7 @@ podman run --rm "${tty_flags[@]}" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \
   "${env_pass[@]}" \
+  -e GRAPHIFY_MCP="$graphify_attached" \
   "$CLAUDE_SANDBOX_IMAGE" \
   "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${mcp_flags[@]}" "$@"
 code=$?

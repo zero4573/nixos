@@ -21,6 +21,32 @@ _: {
       ${lib.getExe' pkgs.libnotify "notify-send"} -a "Claude Code" "$title" "$message" || true
     '';
 
+    # SessionStart: when the session has a `graphify` MCP server (code graph
+    # of the project), tells Claude to reach for it first. "Hooked up" means
+    # GRAPHIFY_MCP=1 (claude-sandbox sets it when its sidecar or a caller's
+    # --mcp-config provides the server) or a project .mcp.json defining one.
+    # Its stdout becomes session context; runs again after /clear and compaction.
+    graphifyContextScript = pkgs.writeShellScript "claude-code-graphify-context" ''
+      set -uo pipefail
+      cwd="$(${lib.getExe pkgs.jq} -r '.cwd // empty' 2>/dev/null || true)"
+      cwd="''${cwd:-$PWD}"
+      if [[ "''${GRAPHIFY_MCP:-}" != 1 ]] \
+          && ! ${lib.getExe pkgs.jq} -e '.mcpServers.graphify' "$cwd/.mcp.json" >/dev/null 2>&1; then
+        exit 0
+      fi
+      cat <<'EOF'
+      This project has a code knowledge graph served by the `graphify` MCP server
+      (mcp__graphify__* tools; kept current as files change). Use it first for questions
+      about the codebase's structure, architecture, where something is defined or used,
+      what depends on what, and how components connect, before broad Grep/Glob/Read
+      sweeps: query_graph for a question, get_node / get_neighbors for a symbol or file,
+      shortest_path for how A reaches B, god_nodes / graph_stats / get_community for an
+      overview. Then read the files it points to for detail; fall back to search when the
+      graph has no answer. Prefer these tools over the /graphify skill's CLI query flows
+      for an existing graph, and don't rebuild graphify-out/ yourself.
+      EOF
+    '';
+
     settings = {
       theme = "dark";
       tui = "fullscreen";
@@ -60,12 +86,17 @@ _: {
           "Bash(ls:*)"
           "Bash(cat:*)"
           "Bash(echo:*)"
+          # graphify's code graph (see graphifyContextScript): read-only tools
+          "mcp__graphify"
         ];
       };
       hooks =
         let
           cmd = command: { type = "command"; inherit command; };
         in {
+          SessionStart = [
+            { matcher = ""; hooks = [ (cmd "${graphifyContextScript}") ]; }
+          ];
           Notification = [
             { matcher = ""; hooks = [ (cmd "${notifyScript}") ]; }
           ];
