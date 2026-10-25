@@ -13,6 +13,7 @@ Keep this list current whenever you add a pin, override, image or download.
 | proton-drive-cli | 0.8.0 | `pkgs/proton-drive-cli/default.nix` (`version`, sha512 `hash`) | Set the new version, put a dummy hash, build, copy the hash from the error. |
 | asdf-vm override | 0.20.2 | `hosts/common.nix` overlay | Workaround: nixpkgs' 0.20.1 tag was deleted upstream. **Remove the override** once nixpkgs ships asdf-vm ≥ 0.20.2. |
 | xwayland-satellite override | 0.8.1 | `hosts/common.nix` overlay | Workaround: 0.8.2 broke Steam popups under niri (Supreeeme/xwayland-satellite#468, #503). **Remove the override** once nixpkgs has a release with the fix. |
+| teamviewer patchelf override | patchelf 0.15.2 (teamviewer itself still follows nixpkgs) | `modules/corp/teamviewer.nix` (`patchelf_0_15`) | Workaround: patchelf ≥ 0.18 writes a teamviewerd whose RW LOAD segment overlaps the code segment, so it segfaults in ld.so. To check whether you can **remove the override**: drop it, build `.#nixosConfigurations.framework-work.config.services.teamviewer.package`, and run `<out>/share/teamviewer/tv_bin/.teamviewerd-wrapped -h`. Exit 1 means it works; exit 139 (segfault) means the bug is still there. |
 | Claude skills from git | none yet | `modules/apps/claude/claude-code.nix` (`skillSources`) | Each entry is pinned by `rev`: `git ls-remote <url> <ref>`, then update `rev`. |
 
 ## Container images pinned by digest

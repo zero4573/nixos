@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792908772,
-        "narHash": "sha256-sTeVwOnxECfH8Qziw44tgdAQa2uGxke6+FMwhT+hbxg=",
+        "lastModified": 1792940919,
+        "narHash": "sha256-UGiO1oPVBR0/7EjqSU6GJpVu8ZogVFopITsvH+9q+RU=",
         "owner": "zero4573",
         "repo": "claude-tickets",
-        "rev": "0cdfb18622ba5294f6f137fee4d8bb732b85f6bf",
+        "rev": "bc1fa74f490b582a387197961d0577129cec4aa6",
         "type": "github"
       },
       "original": {

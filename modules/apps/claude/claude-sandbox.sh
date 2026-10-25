@@ -714,10 +714,18 @@ tty_flags=(-i)
 # container): on the container's own overlayfs root, overlay mounts in it
 # (e.g. podman run --rootfs <dir>:O) fail, an overlay upperdir can't be on
 # overlayfs.
+#
+# --init puts catatonit at PID 1, not claude: it reaps the orphans claude's
+# tools leave behind (git's helpers pile up as zombies until the pids limit
+# is hit otherwise), and stdio MCP servers get claude as a real parent.
+# fff-mcp, for one, watches its parent to know when to exit; with PID 1 as
+# its parent it can't, so it exits after an hour idle instead and claude
+# can't bring it back.
 log "starting claude in $pod_name-claude (pulls its image on first use)"
 claude_started=1
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
 podman run --rm "${tty_flags[@]}" \
+  --init \
   --name "$pod_name-claude" \
   --pod "$pod_name" \
   "${name_labels[@]}" \
