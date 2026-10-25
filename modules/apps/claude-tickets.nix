@@ -7,6 +7,9 @@ _: {
   #  * the MCP servers `ct sync` talks to are sandbox-proxy's, on the host
   #    loopback (modules/apps/sandbox-proxy), started on demand
   #  * the code graph's containers run in aisandbox.slice, with podman
+  #  * the `fff` MCP server the skills search with comes with every
+  #    sandboxed session (programs.claudeSandbox.extraMcpServers), not
+  #    from here
   #  * the tools sessions run (`ct ws`, `ct new`, ...) are on the
   #    sandbox's PATH, and CLAUDE_TICKETS_* variables reach them
   #  * your session rules (sessionSettings below): what ticket and kb
@@ -29,14 +32,18 @@ _: {
       systemdSlice = "aisandbox.slice";
 
       # Ticket and kb sessions commit on their branches (unsigned; `ct ws
-      # sign` on the host), but never push, reset or remove worktrees, nor call
-      # the paid Rovo tools. Their workspace settings file stays read-only
+      # sign` on the host), but never push, reset, force-delete branches,
+      # clean, remove the ticket workspace (`ct ws rm`), nor call the paid
+      # Rovo tools. The lead does add and remove git worktrees: each task
+      # runs in its own worktree under the ticket workspace's `.tasks/`, and
+      # once its branch is merged into the ticket branch the worktree is
+      # removed and the branch deleted with `git branch -d` (merged branches
+      # only; -D stays denied). Their workspace settings file stays read-only
       # (the sandbox mounts Edit/Write denies read-only), so a session can't
       # relax these.
       sessionSettings.permissions.deny = [
         "Bash(git push:*)"
         "Bash(git reset --hard:*)"
-        "Bash(git worktree remove:*)"
         "Bash(git branch -D:*)"
         "Bash(git clean:*)"
         "Bash(ct ws rm:*)"
