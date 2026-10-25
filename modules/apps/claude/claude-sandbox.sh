@@ -611,7 +611,11 @@ done
 # Paths every session may read but not change (CLAUDE_SANDBOX_RO_PATHS, from
 # programs.claudeSandbox.readOnlyPaths), e.g. a model cache: mounted read-only
 # at the same path, also when inside a read-write directory; missing ones are
-# skipped
+# skipped. One equal to or containing a read-write directory (the project
+# included) is skipped with a warning: these are shared caches and never take
+# write access from the project or an --add-dir (W2-nixos-C01); a read-only
+# project comes only from Claude's deny rules, above. Only ~ and $HOME are
+# expanded, not ~user (W1-nixos-C02)
 IFS=: read -ra extra_ro <<< "${CLAUDE_SANDBOX_RO_PATHS:-}"
 for p in "${extra_ro[@]}"; do
   [[ -n "$p" ]] || continue

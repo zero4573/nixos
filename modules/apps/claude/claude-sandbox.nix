@@ -141,7 +141,9 @@
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
     # describes the sandbox)
-    # CLAUDE_SANDBOX_RO_PATHS is colon-separated, so no entry may contain one
+    # CLAUDE_SANDBOX_RO_PATHS is colon-separated, so no entry may contain one.
+    # The launcher text forces it with `lib.optionalString assertColonFree ""`,
+    # which expands to the empty string (W2-nixos-C02)
     assertColonFree = lib.assertMsg
       (lib.all (p: !(lib.hasInfix ":" p)) cfg.readOnlyPaths)
       "programs.claudeSandbox.readOnlyPaths: no entry may contain ':'";
