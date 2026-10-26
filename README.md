@@ -103,13 +103,13 @@ nix build .#nixosConfigurations.<host>.config.system.build.toplevel --dry-run
 `vm` is the only host you can iterate on from a dev machine (via libvirt) day-to-day; once
 it's installed (see above — it needs the same disko install flow as the framework hosts now,
 just on the VM's virtio disk instead of real hardware), further changes are just
-`./nixos-config.sh vm`. `framework-work`/`framework-personal` only ever go through the real
+`./nixos-rebuild.sh vm`. `framework-work`/`framework-personal` only ever go through the real
 install flow above, since disko partitions a real disk.
 
 ## Day-to-day usage
 
 ```sh
-./nixos-config.sh <host>                 # sudo nixos-rebuild switch --flake .#<host>
+./nixos-rebuild.sh <host>                # sudo nixos-rebuild switch --flake .#<host>
 nix flake update                         # bump flake.lock (all inputs)
 nix flake update <input>                 # bump a single input, e.g. nixpkgs
 ```
@@ -125,3 +125,11 @@ podman/disko, etc.).
 The Claude ticket workflow and its Obsidian knowledge base live in their own repo,
 claude-tickets (a flake input, see its README); `modules/apps/claude-tickets.nix` sets it up
 here, on top of the sandboxed `claude` (`modules/apps/claude/claude-sandbox.nix`).
+
+## Documentation
+
+- [Architecture](./docs/architecture.md): hosts, profiles, modules and the sandboxed tooling
+- [claude-sandbox](./docs/claude-sandbox.md): how `claude` launches, mounts, nix-daemon trust, `.tool-versions`, dev tools
+- [sandbox-proxy](./docs/sandbox-proxy.md): the credential broker for registries and MCP servers
+- [asdf-gcroots](./docs/asdf-gcroots.md): why and how asdf installs are rooted against garbage collection
+- [Building and checking](./docs/building-and-checking.md): evaluation, builds, script checks
