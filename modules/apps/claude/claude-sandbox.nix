@@ -114,6 +114,32 @@
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
+    # The kill rules of the managed settings below; claude-sandbox-self-check
+    # compares the mounted file against this same list, so they can't drift.
+    killRules = [ "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)" ];
+    # Commands the self-check expects on the sandbox PATH (devToolsEnv below)
+    expectedTools = [ "git" "jj" "ssh-keygen" "kill" "pkill" "killall" "rg" "jq" "nix" ];
+
+    # `claude-sandbox-self-check`: reports what a session has (see
+    # claude-sandbox-self-check.sh). No runtimeInputs: PATH stays the
+    # session's, so the tool checks are real; jq and timeout are called by
+    # store path. Every input the script reads is exported here, so an
+    # inherited SELF_CHECK_* can't fake a result.
+    selfCheck = pkgs.writeShellApplication {
+      name = "claude-sandbox-self-check";
+      runtimeInputs = [ ];
+      text = ''
+        export SELF_CHECK_TOOLS=${lib.escapeShellArg (lib.concatStringsSep " " expectedTools)}
+        export SELF_CHECK_RULES=${lib.escapeShellArg (builtins.toJSON killRules)}
+        export SELF_CHECK_CONTAINER_MARKER=/run/.containerenv
+        export SELF_CHECK_SETTINGS=/etc/claude-code/managed-settings.json
+        export SELF_CHECK_NIX_SOCKET=/nix/var/nix/daemon-socket/socket
+        export SELF_CHECK_JQ=${pkgs.jq}/bin/jq
+        export SELF_CHECK_TIMEOUT=${pkgs.coreutils}/bin/timeout
+        ${builtins.readFile ./claude-sandbox-self-check.sh}
+      '';
+    };
+
     # Basic Linux and developer tools for use inside the sandbox (the slim
     # Debian image has little beyond coreutils/grep/sed), plus whatever other
     # modules add through programs.claudeSandbox.extraPackages (e.g. the
@@ -144,6 +170,7 @@
         # protocol after a flake update, pin the client to the host's version
         # (osConfig.nix.package when HM runs as a NixOS module).
         nix
+        selfCheck
       ] ++ cfg.extraPackages;
     };
 
@@ -160,7 +187,7 @@
     # settings are untouched.
     managedSettings = pkgs.writeText "claude-sandbox-managed-settings.json"
       (builtins.toJSON {
-        permissions.allow = [ "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)" ];
+        permissions.allow = killRules;
       });
 
     # One launcher, installed as claude and as claude-sandbox (whose --help

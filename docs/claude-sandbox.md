@@ -103,6 +103,22 @@ at `/etc/claude-code/managed-settings.json` that allows `Bash(kill:*)`,
 `Bash(pkill:*)` and `Bash(killall:*)` in the container only; the host's
 settings are unchanged.
 
+## Self-check
+
+`claude-sandbox-self-check` (on the sandbox PATH, in `devToolsEnv`) reports what
+the session has: one `ok:` or `missing:` line per check, exit 1 if anything is
+missing, exit 2 outside the container, exit 3 on a usage error (tools or rules unset). It checks the expected tools on PATH
+(`git jj ssh-keygen kill pkill killall rg jq nix`) and that the managed
+settings' `permissions.allow` is exactly the kill rules. The nix daemon is an
+`info:` line only. The tool and rule lists are the same Nix lists the image
+build uses (`expectedTools`, `killRules` in `claude-sandbox.nix`), so they can't
+drift. Run it after a rebuild, in a new session, to confirm a sandbox fix
+without a live repro. Tools are checked with `type -P` (external files only,
+so the bash builtin `kill` doesn't count), on the session's own PATH; `jq` and
+`timeout` are called by store path. The wrapper exports every `SELF_CHECK_*`
+input, so an inherited one can't fake a result; they are test-only, set by
+running the bare script. The script has no default tool or rule lists. Test: `claude-sandbox-self-check-test.sh`.
+
 ## Other pieces
 
 - **graphify sidecar** (`claude-sandbox-graphify-sidecar.sh`): builds a code

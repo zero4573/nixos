@@ -27,7 +27,7 @@ modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
 modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
 modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, ...)
 modules/apps/claude/            claude-code (settings, hooks, skills/, agents/), claude-sandbox: `claude` sandboxed by default, `claude-open` plain (+ sidecar/setup scripts; every sandboxed session gets the graphify sidecar and `extraMcpServers`, e.g. fff)
-                                 flake check `claude-sandbox` (`claude-sandbox-check.nix`): shellcheck + `claude-sandbox-test.sh` (stubbed launch, asserts the mount list); run the test directly with `bash modules/apps/claude/claude-sandbox-test.sh`
+                                 flake check `claude-sandbox` (`claude-sandbox-check.nix`): shellcheck + `claude-sandbox-test.sh` (stubbed launch, asserts the mount list) and `claude-sandbox-self-check-test.sh`; run the test directly with `bash modules/apps/claude/claude-sandbox-test.sh`
 modules/apps/npm-sandbox/       npm-sandbox.nix + its script
 modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy
 modules/apps/claude-tickets.nix wires the claude-tickets flake input (ticket workflow + Obsidian vaults, its own repo) to this machine: sandbox, sandbox-proxy MCP, session rules
@@ -88,6 +88,7 @@ nix flake check --no-build              # fast: evaluate all modules/configs
 nix build .#nixosConfigurations.<host>.config.system.build.toplevel --dry-run
 ./nixos-rebuild.sh <host>                # sudo nixos-rebuild switch --flake .#<host>
 bash modules/apps/claude/claude-sandbox-test.sh   # sandbox launcher (stubbed podman)
+bash modules/apps/claude/claude-sandbox-self-check-test.sh   # sandbox-self-check command
 bash modules/apps/asdf/asdf-gcroots-test.sh       # asdf GC roots (minimal PATH)
 shellcheck -s bash modules/apps/claude/*.sh modules/apps/asdf/*.sh
 nix build .#checks.x86_64-linux.claude-sandbox .#checks.x86_64-linux.asdf-gcroots
