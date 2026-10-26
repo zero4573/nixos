@@ -7,6 +7,7 @@
       self.nixosModules.hostOptions
       self.nixosModules.users
       self.nixosModules.mouseDebounce
+      self.nixosModules.asdfGcroots
     ];
 
     nixpkgs.overlays = [
