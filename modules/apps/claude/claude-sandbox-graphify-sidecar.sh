@@ -15,8 +15,10 @@ set -eu
 
 # Shared install into the claude-sandbox-graphify volume (sets $venv)
 # shellcheck source=claude-sandbox-graphify-install.sh
+# shellcheck disable=SC1091  # plain shellcheck doesn't follow sources (no -x)
 . /graphify-install.sh
 
+# shellcheck disable=SC2154  # venv is set by the sourced install script
 export PATH="$venv/bin:$PATH"
 # Progress shows in `podman logs` as it happens, not when a buffer fills
 export PYTHONUNBUFFERED=1

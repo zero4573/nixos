@@ -129,6 +129,19 @@
         procps psmisc util-linux lsof strace
         curl wget iproute2 netcat-openbsd dnsutils rsync
         gnumake
+        shellcheck
+        # Jujutsu (jj), for rewriting a ticket branch's unpushed commits into a
+        # tidy history in a scratch clone (the tickets:tidy skill).
+        jujutsu
+        # The nix client, for `nix eval` / `nix flake check --no-build` through
+        # the host nix-daemon (claude-sandbox.sh mounts its socket). pkgs.nix and
+        # not config.nix.package: this is a home-manager module, where the
+        # system option is out of reach without osConfig; the client only needs
+        # to speak to the daemon, whose version is the host's.
+        # Client newer than the daemon is fine; if `nix` ever errors on the
+        # protocol after a flake update, pin the client to the host's version
+        # (osConfig.nix.package when HM runs as a NixOS module).
+        nix
       ] ++ cfg.extraPackages;
     };
 
@@ -140,18 +153,18 @@
         (builtins.toJSON { mcpServers = cfg.extraMcpServers; })));
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
-    # describes the sandbox)
-    # CLAUDE_SANDBOX_RO_PATHS is colon-separated, so no entry may contain one.
-    # The launcher text forces it with `lib.optionalString assertColonFree ""`,
-    # which expands to the empty string (W2-nixos-C02)
-    assertColonFree = lib.assertMsg
-      (lib.all (p: !(lib.hasInfix ":" p)) cfg.readOnlyPaths)
-      "programs.claudeSandbox.readOnlyPaths: no entry may contain ':'";
-    sandboxLauncher = name: pkgs.writeShellApplication {
+    # describes the sandbox). CLAUDE_SANDBOX_RO_PATHS is colon-separated, so
+    # no readOnlyPaths entry may contain a colon: the assert below fails the
+    # evaluation with that message instead of splitting the entry in two at
+    # launch.
+    sandboxLauncher = name:
+      assert lib.assertMsg
+        (lib.all (p: !(lib.hasInfix ":" p)) cfg.readOnlyPaths)
+        "programs.claudeSandbox.readOnlyPaths: no entry may contain ':'";
+      pkgs.writeShellApplication {
       inherit name;
       runtimeInputs = [ pkgs.podman pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq pkgs.git pkgs.gnused ];
       text = ''
-        ${lib.optionalString assertColonFree ""}
         export CLAUDE_SANDBOX_AS=${name}
         export CLAUDE_SANDBOX_PASS_ENV="''${CLAUDE_SANDBOX_PASS_ENV:-${lib.concatStringsSep " " cfg.passEnv}}"
         export CLAUDE_SANDBOX_RO_PATHS="''${CLAUDE_SANDBOX_RO_PATHS:-${lib.concatStringsSep ":" cfg.readOnlyPaths}}"
@@ -160,6 +173,7 @@
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
         export DEV_TOOLS_BIN=${devToolsEnv}/bin
+        export NIX_DAEMON_SOCKET_DIR=/nix/var/nix/daemon-socket
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
         export GRAPHIFY_SIDECAR=${./claude-sandbox-graphify-sidecar.sh}
         export GRAPHIFY_IMAGE=${lib.escapeShellArg graphifyImage}

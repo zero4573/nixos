@@ -63,6 +63,28 @@ What the session can see and change follows Claude's own settings:
     --*system-prompt-file flags, read-only
   * /nix/store, ~/.claude (its settings, skills and agents read-only), and
     any vault's .obsidian/ read-only
+  * the host nix-daemon's socket directory (/nix/var/nix/daemon-socket),
+    when it exists, with NIX_REMOTE=daemon: `nix eval` and `nix flake check
+    --no-build` work in the sandbox. Trade-off: anything in the sandbox can
+    talk to the daemon as the invoking user, so it can ask the host to
+    evaluate, fetch and build things, not just read the store; builds run
+    on the host, outside the sandbox. /nix/store itself stays read-only.
+    That is safe only for an untrusted nix user: the launcher asks the
+    daemon (`nix store info --json`) and skips the mount, with a warning,
+    when you are in nix.settings.trusted-users (root-equivalent); if it
+    can't tell, it does not mount it either (fails closed) and warns;
+    CLAUDE_SANDBOX_NIX_DAEMON=1 mounts it anyway in that case (a known-
+    trusted user never gets it)
+  * a main clone's .git given read-write keeps its config and hooks
+    read-only, so `git branch -d` there prints "could not write config
+    file ... Device or resource busy" (it tries to drop the branch's
+    config section) but still deletes the branch; ticket tooling deletes
+    refs with `git update-ref -d` after its own merge check
+  * ~/.tool-versions, read-only: the host's file if it has one, plus the
+    newest installed version of each asdf plugin it doesn't name (all of
+    them without a host file), so the asdf shims (python3, go, gofmt)
+    work in any directory; a .tool-versions nearer the working
+    directory wins
 
 Sandbox settings (environment):
   CLAUDE_SANDBOX_PORTS=3000,5173   publish ports on the same host ports
@@ -145,8 +167,17 @@ if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   "$CLAUDE_GIT_UPDATE" "$project_root"
 fi
 asdf_data_dir="$HOME/.asdf"
+# Where the host's nix-daemon listens (the launcher sets this to the same
+# value; it is an override for the script's test only, not a user setting)
+nix_daemon_socket_dir="$(realpath -m -- "${NIX_DAEMON_SOCKET_DIR:-/nix/var/nix/daemon-socket}")"
+if [[ "$nix_daemon_socket_dir" != /nix/var/nix/* && "${CLAUDE_SANDBOX_TEST:-}" != 1 ]]; then
+  # the directory is bind-mounted read-write: don't take an arbitrary one
+  warn "NIX_DAEMON_SOCKET_DIR=$nix_daemon_socket_dir is outside /nix/var/nix/ (only the test may set it): ignoring it"
+  nix_daemon_socket_dir=/nix/var/nix/daemon-socket
+fi
 
 # Consolidated exit cleanup
+# shellcheck disable=SC2329 # runs from the EXIT trap
 cleanup() {
   local code=$?
   if [[ -z "${claude_started:-}" ]]; then
@@ -158,6 +189,7 @@ cleanup() {
   [[ -n "${pod_name:-}" ]] && podman pod rm -f -t 5 "$pod_name" >/dev/null 2>&1 || true
   [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]] && rm -rf "$tmp_dir"
   [[ -n "${dbus_proxy_dir:-}" && -d "$dbus_proxy_dir" ]] && rm -rf "$dbus_proxy_dir"
+  return 0  # under set -e, a false last test above would become the exit status
 }
 trap cleanup EXIT
 
@@ -533,6 +565,7 @@ done
 # relative to the settings' base, anything else relative to the project
 abs_path() {  # abs_path <path> <base>
   local p="$1"
+  # shellcheck disable=SC2088 # a literal ~ in the rule, expanded by hand
   case "$p" in
     //*) p="${p#/}" ;;
     "~"|"~/"*) p="$HOME${p#\~}" ;;
@@ -619,6 +652,7 @@ done
 IFS=: read -ra extra_ro <<< "${CLAUDE_SANDBOX_RO_PATHS:-}"
 for p in "${extra_ro[@]}"; do
   [[ -n "$p" ]] || continue
+  # shellcheck disable=SC2088,SC2016 # literal ~ and $HOME in the rule, expanded by hand
   case "$p" in
     "~"|"~/"*) p="$HOME${p#\~}" ;;
     '$HOME'|'$HOME/'*) p="$HOME${p#\$HOME}" ;;
@@ -644,6 +678,10 @@ done
 # the session can add worktrees to it) keeps its config and hooks read-only:
 # from there a session could run code on the host the next time git runs in
 # that clone. (hooks/ is created first, or the session could create it.)
+# Side effect: a plain `git branch -d` in such a clone warns "could not write
+# config file ... Device or resource busy" (the branch.<name> config section
+# can't be removed) but still deletes the ref; ticket tooling uses
+# `git update-ref -d` after a merge check.
 for p in "${!mount_mode[@]}"; do
   [[ "${mount_mode[$p]}" == rw && "$(basename "$p")" == .git ]] || continue
   mkdir -p "$p/hooks"
@@ -670,6 +708,100 @@ for p in "${!mount_mode[@]}"; do
   [[ "${mount_mode[$p]}" == rw ]] && rw_dirs+=("$p")
 done
 log "mounts: project $project_mode, ${#rw_dirs[@]} more read-write, $(( ${#mount_mode[@]} - ${#rw_dirs[@]} )) read-only"
+
+# asdf's shims read $HOME/.tool-versions when no nearer file sets a tool, so
+# python3, go and gofmt would fail in a directory without one. A generated
+# file is mounted read-only at the same place: the host's own lines as they
+# are (if it has a non-empty file), plus the newest installed version of
+# every plugin under asdf's installs/ that the host file doesn't name
+# (numeric sort per dot part), so a host file that lacks python still gives
+# python3 in any directory. A workspace's own .tool-versions
+# (tool-versions-v1, written by ct) is nearer and wins.
+tool_versions_mounts=()
+tv_dest="$HOME/.tool-versions"
+if [[ -n "${mount_mode[$tv_dest]:-}" ]]; then
+  : # a read-only path already mounts it: a second mount would clash
+elif within "$HOME" "${rw_paths[@]}" "${!mount_mode[@]}"; then
+  # $HOME is mounted: the runtime would create an empty ~/.tool-versions on
+  # the host as the mountpoint (or fail when $HOME is read-only)
+  log "no generated .tool-versions: $HOME is itself mounted"
+else
+  # The host's lines first, untouched; the plugins it names (first field of
+  # a non-comment line) are not added again
+  host_plugins=" "
+  if [[ -s "$tv_dest" ]]; then
+    cat "$tv_dest" > "$tmp_dir/.tool-versions"
+    [[ -z "$(tail -c1 "$tv_dest")" ]] || echo >> "$tmp_dir/.tool-versions"
+    host_plugins=" $(awk '/^[[:space:]]*#/ || NF == 0 { next } { printf "%s ", $1 }' "$tv_dest") "
+  else
+    : > "$tmp_dir/.tool-versions"
+  fi
+  added=0
+  for plugin_dir in "$asdf_data_dir"/installs/*/; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugin="$(basename "$plugin_dir")"
+    [[ "$host_plugins" != *" $plugin "* ]] || continue
+    # Numeric names (3.12.1) sort by dot part with sort -V; names like
+    # 3.14-dev or ref-abc only count when there is no numeric one
+    versions="$(find "$plugin_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')"
+    newest="$(grep -E '^[0-9]+(\.[0-9]+)*$' <<< "$versions" | sort -V | tail -n1 || true)"
+    [[ -n "$newest" ]] || newest="$(sort -V <<< "$versions" | tail -n1)"
+    if [[ -n "$newest" ]]; then
+      printf '%s %s\n' "$plugin" "$newest" >> "$tmp_dir/.tool-versions"
+      added=1
+    fi
+  done
+  if (( added )) || [[ -s "$tv_dest" ]]; then
+    tool_versions_mounts+=(-v "$tmp_dir/.tool-versions:$tv_dest:ro")
+  fi
+fi
+
+# The host's nix-daemon, so `nix eval` and `nix flake check --no-build` work
+# in the session (/nix/store is already mounted, read-only). Only the
+# socket's directory is mounted, and only when the daemon is there. The
+# trade-off: the session can talk to the daemon as the invoking user, which
+# lets it evaluate, fetch and build on the host (builds run outside the
+# sandbox); it can't write the store directly, but only while the invoking
+# user is NOT in nix.settings.trusted-users: a trusted client can set
+# `sandbox = false`, extra sandbox paths and import unsigned paths, which is
+# root on the host. So the daemon is asked first (`nix store info --json`,
+# field `trusted`, with the launcher's own nix) and the mount is skipped when
+# the user is trusted, and when it can't be told (fail closed, with a warning);
+# CLAUDE_SANDBOX_NIX_DAEMON=1 forces the mount for the unknown case.
+# The host's nix.conf isn't visible in the container, so the CLI features
+# come through NIX_CONFIG.
+nix_mounts=()
+nix_env_flags=()
+if [[ -d "$nix_daemon_socket_dir" ]]; then
+  nix_bin=nix
+  [[ -x "${DEV_TOOLS_BIN:-}/nix" ]] && nix_bin="$DEV_TOOLS_BIN/nix"
+  nix_trusted=unknown
+  for nix_cmd in "store info" "store ping"; do
+    nix_rc=0
+    # shellcheck disable=SC2086 # the two words of the subcommand
+    nix_json="$(NIX_REMOTE=daemon NIX_CONFIG="experimental-features = nix-command flakes" \
+      timeout 5 "$nix_bin" $nix_cmd --json 2>/dev/null)" || nix_rc=$?
+    # a hung daemon: don't wait for the second probe too
+    [[ "$nix_rc" == 124 ]] && break
+    [[ "$nix_rc" != 0 ]] && continue
+    nix_trusted="$(jq -r 'if .trusted == null then "unknown" elif (.trusted == 0 or .trusted == false) then "no" else "yes" end' <<< "$nix_json" 2>/dev/null)" || nix_trusted=unknown
+    [[ "$nix_trusted" != unknown ]] && break
+  done
+  case "$nix_trusted" in
+    yes) warn "not mounting the nix-daemon socket: you are a trusted nix user, which would be root on the host" ;;
+    no) :  ;;
+    *)
+      if [[ "${CLAUDE_SANDBOX_NIX_DAEMON:-}" == 1 ]]; then
+        warn "nix-daemon: couldn't tell if you are a trusted nix user; mounting its socket because CLAUDE_SANDBOX_NIX_DAEMON=1"
+      else
+        warn "not mounting the nix-daemon socket: couldn't tell if you are a trusted nix user; set CLAUDE_SANDBOX_NIX_DAEMON=1 to mount it anyway"
+      fi ;;
+  esac
+  if [[ "$nix_trusted" == no || ( "$nix_trusted" == unknown && "${CLAUDE_SANDBOX_NIX_DAEMON:-}" == 1 ) ]]; then
+    nix_mounts+=(-v "$nix_daemon_socket_dir:$nix_daemon_socket_dir")
+    nix_env_flags+=(-e NIX_REMOTE=daemon -e "NIX_CONFIG=experimental-features = nix-command flakes")
+  fi
+fi
 
 # Kept read-only on top of the writable mounts:
 #  * the host-side Claude config (settings with its hooks, skills, agents),
@@ -741,6 +873,8 @@ podman run --rm "${tty_flags[@]}" \
   -v "$HOME/.claude:$HOME/.claude:rw" \
   -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
   "${mounts[@]}" \
+  "${tool_versions_mounts[@]}" \
+  "${nix_mounts[@]}" \
   "${protect_mounts[@]}" \
   "${dbus_mounts[@]}" \
   -e HOME="$HOME" \
@@ -757,6 +891,7 @@ podman run --rm "${tty_flags[@]}" \
   -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \
+  "${nix_env_flags[@]}" \
   "${env_pass[@]}" \
   -e GRAPHIFY_MCP="$graphify_attached" \
   "$CLAUDE_SANDBOX_IMAGE" \
