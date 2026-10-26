@@ -25,6 +25,7 @@ sequenceDiagram
     L->>P: sandbox-proxy start (reuses running containers)
     L->>L: create pod in aisandbox.slice, start graphify sidecar
     L->>L: compute mounts from Claude settings
+    L->>L: mount the managed settings (skip and warn if MANAGED_SETTINGS is unset)
     L->>L: generate ~/.tool-versions
     L->>D: nix store info --json: is the user trusted?
     D-->>L: trusted yes, no or unknown
@@ -101,23 +102,44 @@ Claude Code's permission layer (not the OS) stops `kill`, `pkill` and `killall`
 by default. The launcher mounts a Nix-generated managed-settings file read-only
 at `/etc/claude-code/managed-settings.json` that allows `Bash(kill:*)`,
 `Bash(pkill:*)` and `Bash(killall:*)` in the container only; the host's
-settings are unchanged.
+settings are unchanged. If the Nix wrapper did not set `MANAGED_SETTINGS`, the
+launcher skips the mount and warns on stderr; the session then keeps Claude's
+default permission checks for those commands.
 
 ## Self-check
 
 `claude-sandbox-self-check` (on the sandbox PATH, in `devToolsEnv`) reports what
-the session has: one `ok:` or `missing:` line per check, exit 1 if anything is
-missing, exit 2 outside the container, exit 3 on a usage error (tools or rules unset). It checks the expected tools on PATH
-(`git jj ssh-keygen kill pkill killall rg jq nix`) and that the managed
-settings' `permissions.allow` is exactly the kill rules. The nix daemon is an
-`info:` line only. The tool and rule lists are the same Nix lists the image
-build uses (`expectedTools`, `killRules` in `claude-sandbox.nix`), so they can't
-drift. Run it after a rebuild, in a new session, to confirm a sandbox fix
-without a live repro. Tools are checked with `type -P` (external files only,
-so the bash builtin `kill` doesn't count), on the session's own PATH; `jq` and
-`timeout` are called by store path. The wrapper exports every `SELF_CHECK_*`
-input, so an inherited one can't fake a result; they are test-only, set by
-running the bare script. The script has no default tool or rule lists. Test: `claude-sandbox-self-check-test.sh`.
+the session has, one line per check, so a sandbox fix can be confirmed after a
+rebuild in a new session without a live repro.
+
+```mermaid
+flowchart TD
+    start["claude-sandbox-self-check"] --> inp{"tools and rules set?"}
+    inp -->|"no"| e3["exit 3: usage error"]
+    inp -->|"yes"| c{"container marker present?"}
+    c -->|"no"| e2["exit 2: not in the container"]
+    c -->|"yes"| tools["ok or missing per tool on PATH"]
+    tools --> set["managed settings permissions.allow equals the kill rules?"]
+    set --> nix["info line: nix daemon answering or not"]
+    nix --> m{"anything missing?"}
+    m -->|"no"| e0["exit 0"]
+    m -->|"yes"| e1["exit 1"]
+```
+
+- Lines are `ok:`, `missing:` or `info:`; the nix daemon is `info:` only.
+- Tools: `git jj ssh-keygen kill pkill killall rg jq nix`, checked with
+  `type -P` (external files only, so the bash builtin `kill` doesn't count) on
+  the session's own PATH.
+- Settings: `/etc/claude-code/managed-settings.json` must be readable JSON whose
+  `permissions.allow` is exactly the kill rules (order ignored).
+- The tool and rule lists are the Nix lists the image build uses
+  (`expectedTools`, `killRules` in `claude-sandbox.nix`), so they can't drift;
+  the script has no defaults for them.
+- The wrapper exports every `SELF_CHECK_*` input (lists, container marker,
+  settings path, nix socket, store paths of `jq` and `timeout`), so an inherited
+  value can't fake a result. They are test-only knobs, set by running the bare
+  script.
+- Test: `modules/apps/claude/claude-sandbox-self-check-test.sh`.
 
 ## Other pieces
 

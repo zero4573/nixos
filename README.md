@@ -129,7 +129,7 @@ here, on top of the sandboxed `claude` (`modules/apps/claude/claude-sandbox.nix`
 ## Documentation
 
 - [Architecture](./docs/architecture.md): hosts, profiles, modules and the sandboxed tooling
-- [claude-sandbox](./docs/claude-sandbox.md): how `claude` launches, mounts, nix-daemon trust, `.tool-versions`, dev tools
+- [claude-sandbox](./docs/claude-sandbox.md): how `claude` launches, mounts, nix-daemon trust, `.tool-versions`, dev tools, kill allow, self-check
 - [sandbox-proxy](./docs/sandbox-proxy.md): the credential broker for registries and MCP servers
 - [asdf-gcroots](./docs/asdf-gcroots.md): why and how asdf installs are rooted against garbage collection
 - [Building and checking](./docs/building-and-checking.md): evaluation, builds, script checks
