@@ -77,6 +77,7 @@ run_case() {
   NESTED_PODMAN_SETUP=/nix/store/fake-setup \
   NESTED_PODMAN_ENV_BIN=/nix/store/fake-podman/bin \
   DEV_TOOLS_BIN=/nix/store/fake-tools/bin \
+  MANAGED_SETTINGS="${managed_settings-/nix/store/fake-managed-settings.json}" \
   ASDF_VM_BIN=/nix/store/fake-asdf/bin \
   CLAUDE_GIT_UPDATE="$stubs/git-update" \
   GIT_GLOBAL_IGNORE=/nix/store/fake-ignore \
@@ -255,6 +256,15 @@ if mounts emptyplugin | grep -q "/.tool-versions"; then fail "mount for an empty
 new_home noplugins
 run_case noplugins
 if mounts noplugins | grep -q "/.tool-versions"; then fail "mount with no plugins: $(mounts noplugins)"; else ok "no mount with no plugins"; fi
+
+# 13. Container-only managed settings (kill allow rules) are mounted read-only
+new_home managed
+run_case managed
+assert_mount managed "/nix/store/fake-managed-settings.json:/etc/claude-code/managed-settings.json:ro" "managed settings mounted read-only"
+new_home nomanaged
+managed_settings="" run_case nomanaged
+if mounts nomanaged | grep -q '/etc/claude-code/'; then fail "managed settings mounted without MANAGED_SETTINGS"; else ok "no managed settings mount without MANAGED_SETTINGS"; fi
+if grep -q 'MANAGED_SETTINGS is unset' "$root/out-nomanaged/stderr"; then ok "unset MANAGED_SETTINGS warns"; else fail "no warning for unset MANAGED_SETTINGS"; fi
 
 if (( failures > 0 )); then
   echo "$failures check(s) failed" >&2

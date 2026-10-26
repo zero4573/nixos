@@ -63,6 +63,8 @@ What the session can see and change follows Claude's own settings:
     --*system-prompt-file flags, read-only
   * /nix/store, ~/.claude (its settings, skills and agents read-only), and
     any vault's .obsidian/ read-only
+  * container-only managed settings at /etc/claude-code/managed-settings.json
+    that allow kill, pkill and killall (the host's settings are unchanged)
   * the host nix-daemon's socket directory (/nix/var/nix/daemon-socket),
     when it exists, with NIX_REMOTE=daemon: `nix eval` and `nix flake check
     --no-build` work in the sandbox. Trade-off: anything in the sandbox can
@@ -855,6 +857,15 @@ tty_flags=(-i)
 # can't bring it back.
 log "starting claude in $pod_name-claude (pulls its image on first use)"
 claude_started=1
+# Container-only managed settings (the kill allow rules), set by the Nix
+# wrapper; without it the session just lacks those rules
+managed_mounts=()
+if [[ -n "${MANAGED_SETTINGS:-}" ]]; then
+  managed_mounts=(-v "$MANAGED_SETTINGS:/etc/claude-code/managed-settings.json:ro")
+else
+  echo "claude-sandbox: MANAGED_SETTINGS is unset; kill commands keep Claude's default permission checks" >&2
+fi
+
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
 podman run --rm "${tty_flags[@]}" \
   --init \
@@ -872,6 +883,7 @@ podman run --rm "${tty_flags[@]}" \
   -v "$asdf_data_dir:$asdf_data_dir:ro" \
   -v "$HOME/.claude:$HOME/.claude:rw" \
   -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
+  "${managed_mounts[@]}" \
   "${mounts[@]}" \
   "${tool_versions_mounts[@]}" \
   "${nix_mounts[@]}" \

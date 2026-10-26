@@ -133,6 +133,8 @@
         # Jujutsu (jj), for rewriting a ticket branch's unpushed commits into a
         # tidy history in a scratch clone (the tickets:tidy skill).
         jujutsu
+        # ssh-keygen for the signing testscripts (client tools only, no sshd).
+        openssh
         # The nix client, for `nix eval` / `nix flake check --no-build` through
         # the host nix-daemon (claude-sandbox.sh mounts its socket). pkgs.nix and
         # not config.nix.package: this is a home-manager module, where the
@@ -151,6 +153,15 @@
     extraMcpConfig = lib.optionalString (cfg.extraMcpServers != { })
       (toString (pkgs.writeText "claude-sandbox-extra-mcp.json"
         (builtins.toJSON { mcpServers = cfg.extraMcpServers; })));
+
+    # Managed settings for the container only (mounted read-only at
+    # /etc/claude-code/managed-settings.json): allow rules so Claude Code's
+    # permission layer doesn't stop kill commands inside the sandbox. The host's
+    # settings are untouched.
+    managedSettings = pkgs.writeText "claude-sandbox-managed-settings.json"
+      (builtins.toJSON {
+        permissions.allow = [ "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)" ];
+      });
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
     # describes the sandbox). CLAUDE_SANDBOX_RO_PATHS is colon-separated, so
@@ -173,6 +184,7 @@
         export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
         export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
         export DEV_TOOLS_BIN=${devToolsEnv}/bin
+        export MANAGED_SETTINGS=${managedSettings}
         export NIX_DAEMON_SOCKET_DIR=/nix/var/nix/daemon-socket
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
         export GRAPHIFY_SIDECAR=${./claude-sandbox-graphify-sidecar.sh}

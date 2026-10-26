@@ -92,7 +92,16 @@ reached through the read-only store mount: git, coreutils and friends, ripgrep,
 fd, jq, yq, archive tools, process and network tools, make, shellcheck,
 Jujutsu (`jj`, for tidying unpushed history in a scratch clone), the `nix` client
 and `programs.claudeSandbox.extraPackages`. The nested podman toolchain lets the
-session run containers of its own.
+session run containers of its own. `openssh` is there for `ssh-keygen` only (no
+sshd, no ssh config).
+
+## Kill commands
+
+Claude Code's permission layer (not the OS) stops `kill`, `pkill` and `killall`
+by default. The launcher mounts a Nix-generated managed-settings file read-only
+at `/etc/claude-code/managed-settings.json` that allows `Bash(kill:*)`,
+`Bash(pkill:*)` and `Bash(killall:*)` in the container only; the host's
+settings are unchanged.
 
 ## Other pieces
 
