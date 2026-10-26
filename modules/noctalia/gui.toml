@@ -2,6 +2,9 @@
 # by update-noctalia-config.sh. Layers over the Nix-generated config.toml
 # (see noctalia.nix); remove a key here to hand it back to Nix.
 
+[bar.main]
+end = [ "bluetooth", "network", "battery", "brightness", "volume", "clock", "control-center" ]
+
 [lockscreen_widgets]
 enabled = false
 schema_version = 2
@@ -39,3 +42,9 @@ widget_order = [ "lockscreen-login-box@eDP-1" ]
         show_session_buttons = true
         show_unlock_hint = true
         show_weather = true
+
+[widget.clock]
+format = "{:%a %b %e} {:%H:%M}"
+
+[widget.tray]
+drawer = true
