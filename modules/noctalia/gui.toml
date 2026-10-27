@@ -43,6 +43,9 @@ widget_order = [ "lockscreen-login-box@eDP-1" ]
         show_unlock_hint = true
         show_weather = true
 
+[notification]
+history_retention_hours = 1
+
 [widget.clock]
 format = "{:%a %b %e} {:%H:%M}"
 

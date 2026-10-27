@@ -56,6 +56,10 @@ _: {
       # this they drop down from the middle of the bar, not under the widget
       shell.panel.open_near_click_control_center = true;
 
+      # Volume/brightness/media-track popups default to top_center; put them
+      # in the corner with the notification toasts (which default top_right)
+      osd.position = "top_right";
+
       location.address = "Toronto, ON";
       weather = {
         enabled = true;
