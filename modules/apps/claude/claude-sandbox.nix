@@ -114,9 +114,14 @@
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
-    # The kill rules of the managed settings below; claude-sandbox-self-check
+    # The allow rules of the managed settings below (kill commands, and
+    # deleting files: the launcher also drops the user settings' matching
+    # denies, such as rm -rf, in the container); claude-sandbox-self-check
     # compares the mounted file against this same list, so they can't drift.
-    killRules = [ "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)" ];
+    sandboxAllowRules = [
+      "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)"
+      "Bash(rm:*)" "Bash(rm -rf:*)" "Bash(rmdir:*)" "Bash(unlink:*)"
+    ];
     # Commands the self-check expects on the sandbox PATH (devToolsEnv below)
     expectedTools = [ "git" "jj" "ssh-keygen" "kill" "pkill" "killall" "rg" "jq" "nix" ];
 
@@ -130,7 +135,7 @@
       runtimeInputs = [ ];
       text = ''
         export SELF_CHECK_TOOLS=${lib.escapeShellArg (lib.concatStringsSep " " expectedTools)}
-        export SELF_CHECK_RULES=${lib.escapeShellArg (builtins.toJSON killRules)}
+        export SELF_CHECK_RULES=${lib.escapeShellArg (builtins.toJSON sandboxAllowRules)}
         export SELF_CHECK_CONTAINER_MARKER=/run/.containerenv
         export SELF_CHECK_SETTINGS=/etc/claude-code/managed-settings.json
         export SELF_CHECK_NIX_SOCKET=/nix/var/nix/daemon-socket/socket
@@ -183,11 +188,11 @@
 
     # Managed settings for the container only (mounted read-only at
     # /etc/claude-code/managed-settings.json): allow rules so Claude Code's
-    # permission layer doesn't stop kill commands inside the sandbox. The host's
-    # settings are untouched.
+    # permission layer doesn't stop kill commands or file deletes inside the
+    # sandbox. The host's settings are untouched.
     managedSettings = pkgs.writeText "claude-sandbox-managed-settings.json"
       (builtins.toJSON {
-        permissions.allow = killRules;
+        permissions.allow = sandboxAllowRules;
       });
 
     # One launcher, installed as claude and as claude-sandbox (whose --help

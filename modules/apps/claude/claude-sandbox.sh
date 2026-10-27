@@ -64,7 +64,9 @@ What the session can see and change follows Claude's own settings:
   * /nix/store, ~/.claude (its settings, skills and agents read-only), and
     any vault's .obsidian/ read-only
   * container-only managed settings at /etc/claude-code/managed-settings.json
-    that allow kill, pkill and killall (the host's settings are unchanged)
+    that allow kill, pkill, killall, rm, rmdir and unlink; the user settings'
+    denies of the same rules (rm -rf) are dropped in the container (the
+    host's settings are unchanged)
   * the host nix-daemon's socket directory (/nix/var/nix/daemon-socket),
     when it exists, with NIX_REMOTE=daemon: `nix eval` and `nix flake check
     --no-build` work in the sandbox. Trade-off: anything in the sandbox can
@@ -811,9 +813,26 @@ fi
 #  * the .obsidian folder of any Obsidian vault mounted writable: community
 #    plugins installed there would run in Obsidian on the host
 protect_mounts=()
-for p in "$HOME/.claude/settings.json" "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/CLAUDE.md"; do
+for p in "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/CLAUDE.md"; do
   [[ -e "$p" ]] && protect_mounts+=(-v "$p:$p:ro")
 done
+# The user settings, minus each deny rule the container's managed settings
+# allow (e.g. rm -rf, denied on the host): a deny wins over an allow at any
+# level, so the managed allow alone wouldn't lift it. Unfiltered when there
+# are no managed settings to read.
+user_settings="$HOME/.claude/settings.json"
+if [[ -e "$user_settings" ]]; then
+  if [[ -r "${MANAGED_SETTINGS:-}" ]] &&
+    jq --slurpfile m "$MANAGED_SETTINGS" '
+      ($m[0].permissions.allow // []) as $allow
+      | if (.permissions.deny | type) == "array"
+        then .permissions.deny |= map(select(. as $r | $allow | index($r) | not))
+        else . end' "$user_settings" > "$tmp_dir/settings.json" 2>/dev/null; then
+    protect_mounts+=(-v "$tmp_dir/settings.json:$user_settings:ro")
+  else
+    protect_mounts+=(-v "$user_settings:$user_settings:ro")
+  fi
+fi
 for d in "$project_root" "${rw_dirs[@]}"; do
   [[ -d "$d/.obsidian" && -z "${mount_mode[$d/.obsidian]:-}" ]] && protect_mounts+=(-v "$d/.obsidian:$d/.obsidian:ro")
 done
@@ -857,13 +876,13 @@ tty_flags=(-i)
 # can't bring it back.
 log "starting claude in $pod_name-claude (pulls its image on first use)"
 claude_started=1
-# Container-only managed settings (the kill allow rules), set by the Nix
-# wrapper; without it the session just lacks those rules
+# Container-only managed settings (the kill and delete allow rules), set
+# by the Nix wrapper; without it the session just lacks those rules
 managed_mounts=()
 if [[ -n "${MANAGED_SETTINGS:-}" ]]; then
   managed_mounts=(-v "$MANAGED_SETTINGS:/etc/claude-code/managed-settings.json:ro")
 else
-  echo "claude-sandbox: MANAGED_SETTINGS is unset; kill commands keep Claude's default permission checks" >&2
+  echo "claude-sandbox: MANAGED_SETTINGS is unset; kill and delete commands keep Claude's default permission checks" >&2
 fi
 
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \

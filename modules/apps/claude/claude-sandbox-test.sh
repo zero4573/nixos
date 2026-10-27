@@ -15,7 +15,7 @@ fail() { echo "FAIL: $*" >&2; failures=$((failures + 1)); }
 ok() { echo "ok: $*"; }
 
 # Stubs: podman records the arguments of `run` (one per line) and copies the
-# source of any mount onto ~/.tool-versions; everything else succeeds, except
+# source of any mount onto ~/.tool-versions and ~/.claude/settings.json; everything else succeeds, except
 # `pod exists` (no name clashes) and `inspect`. nix answers `store info` with
 # "trusted" from STUB_NIX_TRUSTED (0, 1, none = field absent, fail = error).
 # The shebang is the running bash, not /usr/bin/env: the Nix build sandbox has
@@ -34,6 +34,9 @@ if [[ "$1" == run ]]; then
   for a in "$@"; do
     if [[ "$prev" == -v && "$a" == *:*/.tool-versions:ro ]]; then
       cp "${a%%:*}" "$STUB_OUT/tool-versions.copy"
+    fi
+    if [[ "$prev" == -v && "$a" == *:*/.claude/settings.json:ro ]]; then
+      cp "${a%%:*}" "$STUB_OUT/settings.copy"
     fi
     prev="$a"
   done
@@ -257,7 +260,7 @@ new_home noplugins
 run_case noplugins
 if mounts noplugins | grep -q "/.tool-versions"; then fail "mount with no plugins: $(mounts noplugins)"; else ok "no mount with no plugins"; fi
 
-# 13. Container-only managed settings (kill allow rules) are mounted read-only
+# 13. Container-only managed settings (kill and delete allow rules) are mounted read-only
 new_home managed
 run_case managed
 assert_mount managed "/nix/store/fake-managed-settings.json:/etc/claude-code/managed-settings.json:ro" "managed settings mounted read-only"
@@ -265,6 +268,29 @@ new_home nomanaged
 managed_settings="" run_case nomanaged
 if mounts nomanaged | grep -q '/etc/claude-code/'; then fail "managed settings mounted without MANAGED_SETTINGS"; else ok "no managed settings mount without MANAGED_SETTINGS"; fi
 if grep -q 'MANAGED_SETTINGS is unset' "$root/out-nomanaged/stderr"; then ok "unset MANAGED_SETTINGS warns"; else fail "no warning for unset MANAGED_SETTINGS"; fi
+
+# 14. The user settings reach the container minus the denies the managed
+# settings allow (rm -rf); unfiltered without managed settings
+new_home filtered
+mkdir -p "$home/.claude"
+echo '{"permissions":{"deny":["Bash(rm -rf:*)","Bash(git push:*)"],"allow":["Bash(ls:*)"]},"theme":"dark"}' > "$home/.claude/settings.json"
+echo '{"permissions":{"allow":["Bash(kill:*)","Bash(rm -rf:*)"]}}' > "$root/managed.json"
+managed_settings="$root/managed.json" run_case filtered
+if [[ "$(mounts filtered | grep -c ":$home/.claude/settings.json:ro$")" == 1 ]] && ! has_mount filtered "$home/.claude/settings.json:$home/.claude/settings.json:ro"; then
+  ok "user settings mounted once, as the filtered copy"
+else
+  fail "user settings mounts: $(mounts filtered | grep settings.json)"
+fi
+if jq -e '.permissions.deny == ["Bash(git push:*)"] and .permissions.allow == ["Bash(ls:*)"] and .theme == "dark"' "$root/out-filtered/settings.copy" > /dev/null; then
+  ok "the managed allow lifts the matching deny, the rest is kept"
+else
+  fail "filtered settings: $(cat "$root/out-filtered/settings.copy" 2>/dev/null)"
+fi
+new_home unfiltered
+mkdir -p "$home/.claude"
+echo '{"permissions":{"deny":["Bash(rm -rf:*)"]}}' > "$home/.claude/settings.json"
+run_case unfiltered
+assert_mount unfiltered "$home/.claude/settings.json:$home/.claude/settings.json:ro" "no readable managed settings: the user settings as they are"
 
 if (( failures > 0 )); then
   echo "$failures check(s) failed" >&2

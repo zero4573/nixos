@@ -48,8 +48,9 @@ What the session can touch follows Claude's own settings, not sandbox flags:
   read-write directory (the most specific path wins), files named by
   `--settings`, `--mcp-config`, `--plugin-dir` and `--*system-prompt-file`, and
   `programs.claudeSandbox.readOnlyPaths`;
-- `/nix/store` read-only, `~/.claude` read-write (its settings, skills and
-  agents read-only), the asdf data dir read-only, any vault's `.obsidian/`
+- `/nix/store` read-only, `~/.claude` read-write (its settings, filtered as in
+  [Kill and delete commands](#kill-and-delete-commands), skills and agents
+  read-only), the asdf data dir read-only, any vault's `.obsidian/`
   read-only.
 
 ## nix-daemon socket and trust
@@ -96,15 +97,26 @@ and `programs.claudeSandbox.extraPackages`. The nested podman toolchain lets the
 session run containers of its own. `openssh` is there for `ssh-keygen` only (no
 sshd, no ssh config).
 
-## Kill commands
+## Kill and delete commands
 
 Claude Code's permission layer (not the OS) stops `kill`, `pkill` and `killall`
-by default. The launcher mounts a Nix-generated managed-settings file read-only
-at `/etc/claude-code/managed-settings.json` that allows `Bash(kill:*)`,
-`Bash(pkill:*)` and `Bash(killall:*)` in the container only; the host's
-settings are unchanged. If the Nix wrapper did not set `MANAGED_SETTINGS`, the
-launcher skips the mount and warns on stderr; the session then keeps Claude's
-default permission checks for those commands.
+by default, and the user settings deny `rm -rf`. The launcher mounts a
+Nix-generated managed-settings file read-only at
+`/etc/claude-code/managed-settings.json` that allows, in the container only:
+
+- `Bash(kill:*)`, `Bash(pkill:*)`, `Bash(killall:*)`
+- `Bash(rm:*)`, `Bash(rm -rf:*)`, `Bash(rmdir:*)`, `Bash(unlink:*)`
+
+A deny wins over an allow at any settings level, so the allow alone wouldn't
+lift the user settings' `rm -rf` deny. The launcher therefore mounts a copy of
+`~/.claude/settings.json` without the deny rules the managed settings allow
+(read-only, over the original); every other rule stays. The host's settings are
+unchanged, so `claude-open` still denies `rm -rf`. Project settings (e.g. a
+ticket workspace's `git clean` deny) are not filtered.
+
+If the Nix wrapper did not set `MANAGED_SETTINGS`, the launcher skips the mount
+and warns on stderr, and mounts the user settings unfiltered; the session then
+keeps Claude's default permission checks for those commands.
 
 ## Self-check
 
@@ -119,7 +131,7 @@ flowchart TD
     inp -->|"yes"| c{"container marker present?"}
     c -->|"no"| e2["exit 2: not in the container"]
     c -->|"yes"| tools["ok or missing per tool on PATH"]
-    tools --> set["managed settings permissions.allow equals the kill rules?"]
+    tools --> set["managed settings permissions.allow equals the kill and delete rules?"]
     set --> nix["info line: nix daemon answering or not"]
     nix --> m{"anything missing?"}
     m -->|"no"| e0["exit 0"]
@@ -131,9 +143,9 @@ flowchart TD
   `type -P` (external files only, so the bash builtin `kill` doesn't count) on
   the session's own PATH.
 - Settings: `/etc/claude-code/managed-settings.json` must be readable JSON whose
-  `permissions.allow` is exactly the kill rules (order ignored).
+  `permissions.allow` is exactly the kill and delete rules (order ignored).
 - The tool and rule lists are the Nix lists the image build uses
-  (`expectedTools`, `killRules` in `claude-sandbox.nix`), so they can't drift;
+  (`expectedTools`, `sandboxAllowRules` in `claude-sandbox.nix`), so they can't drift;
   the script has no defaults for them.
 - The wrapper exports every `SELF_CHECK_*` input (lists, container marker,
   settings path, nix socket, store paths of `jq` and `timeout`), so an inherited
