@@ -17,6 +17,8 @@ _: {
   #    readOnlyPaths), so `ct vault search` finds its models; they are
   #    fetched on the host first (`ct vault model fetch`), a missing
   #    cache is skipped with a log line
+  #  * CLAUDE_SANDBOX_* set in the shell that runs `ct` reach that one
+  #    session's sandbox (claude-tickets-env.zsh)
   #  * your session rules (sessionSettings below): what ticket and kb
   #    sessions may never do, on top of claude-tickets' own (main clones
   #    read-only)
@@ -64,5 +66,11 @@ _: {
     programs.claudeSandbox.extraPackages = config.programs.claude-tickets.sessionTools;
     programs.claudeSandbox.passEnv = [ "CLAUDE_TICKETS_*" ];
     programs.claudeSandbox.readOnlyPaths = [ "${config.xdg.cacheHome}/claude-tickets/models" ];
+
+    # `CLAUDE_SANDBOX_PORTS=3000 ct start PROJ-12`: a zsh wrapper hands the
+    # shell's CLAUDE_SANDBOX_* to that one session (see the file)
+    programs.zsh.initContent = ''
+      source ${./claude-tickets-env.zsh}
+    '';
   };
 }
