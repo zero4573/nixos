@@ -11,6 +11,7 @@
 
       # Compositor + shell
       self.nixosModules.niri
+      self.nixosModules.noctalia
       self.nixosModules.thunar
 
       # Applications

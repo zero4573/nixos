@@ -3,7 +3,8 @@
 # (see noctalia.nix); remove a key here to hand it back to Nix.
 
 [bar.main]
-end = [ "bluetooth", "network", "battery", "brightness", "volume", "clock", "control-center" ]
+center = [ "disk", "cpu-power", "temp", "cpu", "gpu", "ram", "net-down", "net-up", "sysmon" ]
+end = [ "bluetooth", "network", "battery", "brightness", "volume", "clock", "settings" ]
 
 [lockscreen_widgets]
 enabled = false
@@ -48,6 +49,47 @@ history_retention_hours = 1
 
 [widget.clock]
 format = "{:%a %b %e} {:%H:%M}"
+
+[widget.cpu]
+custom_label = "CPU"
+interactive = false
+show_glyph = false
+visualization = "graph"
+
+[widget.cpu-power]
+interactive = false
+
+[widget.disk]
+interactive = false
+
+[widget.gpu]
+custom_label = "GPU"
+interactive = false
+show_glyph = false
+visualization = "graph"
+
+[widget.net-down]
+interactive = false
+visualization = "graph"
+
+[widget.net-up]
+interactive = false
+visualization = "graph"
+
+[widget.ram]
+custom_label = "RAM"
+interactive = false
+show_glyph = false
+visualization = "graph"
+
+[widget.sysmon]
+glyph = "activity-heartbeat"
+show_value = false
+visualization = "none"
+
+[widget.temp]
+interactive = false
+visualization = "graph"
 
 [widget.tray]
 drawer = true

@@ -1,4 +1,33 @@
 _: {
+  # Feeds the cpu_power plugin: samples the root-only RAPL energy counter and
+  # publishes a coarse wattage history to /run/cpu-power/watts (./cpu-power.sh).
+  flake.nixosModules.noctalia = { pkgs, ... }: {
+    systemd.services.cpu-power = {
+      description = "Publish CPU package power for the noctalia bar";
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionPathExists = "/sys/class/powercap/intel-rapl:0/energy_uj";
+      path = [ pkgs.coreutils ];
+      serviceConfig = {
+        ExecStart = "${pkgs.bash}/bin/bash ${./cpu-power.sh} /run/cpu-power/watts";
+        Restart = "on-failure";
+        DynamicUser = true;
+        # Just enough to read energy_uj; nothing else is reachable
+        AmbientCapabilities = [ "CAP_DAC_READ_SEARCH" ];
+        CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+        RuntimeDirectory = "cpu-power";
+        RuntimeDirectoryMode = "0755";
+        UMask = "0022";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateNetwork = true;
+        PrivateDevices = true;
+        NoNewPrivileges = true;
+        RestrictAddressFamilies = "none";
+        SystemCallFilter = [ "@system-service" ];
+      };
+    };
+  };
+
   flake.homeModules.noctalia = { pkgs, lib, osConfig, ... }:
   let
     assets = ../../assets;
@@ -19,7 +48,7 @@ _: {
         position = "top";
         margin_ends = 0; # v5 insets the bar 100px from each end by default
         start = [ "tray" "workspaces" "media" ];
-        center = [ "cpu" "gpu" "disk" "ram" "net-down" "net-up" ];
+        center = [ "temp" "cpu-power" "cpu" "gpu" "disk" "ram" "net-down" "net-up" ];
         end = [
           "battery" "brightness" "network" "bluetooth" "volume"
           "clock" "notifications" "control-center"
@@ -28,6 +57,7 @@ _: {
 
       # Each sysmon widget shows one stat; named entries let several coexist
       widget = {
+        cpu-power.type = "local/cpu_power:power"; # ./plugins/cpu_power
         cpu = { type = "sysmon"; stat = "cpu_usage"; };
         gpu = { type = "sysmon"; stat = "gpu_usage"; };
         disk = { type = "sysmon"; stat = "disk_used_pct"; path = "/"; };
@@ -42,6 +72,17 @@ _: {
           stat = "net_tx";
           interface = osConfig.hostConfig.wifiInterface;
         };
+      };
+
+      plugins.enabled = [ "local/cpu_power" ];
+
+      # Graphs scroll at the fastest interval; keep every graphed group on it
+      # (disk stays at its 10s default, it's shown as a number)
+      system.monitor = {
+        cpu_poll_seconds = 2;
+        gpu_poll_seconds = 2;
+        memory_poll_seconds = 2;
+        network_poll_seconds = 2;
       };
 
       wallpaper = {
@@ -70,6 +111,8 @@ _: {
     home.packages = [ pkgs.noctalia ];
 
     xdg.configFile."noctalia/config.toml".source = config;
+    # Plugins under the data dir are discovered as the built-in "local" source
+    xdg.dataFile."noctalia/plugins/cpu_power".source = ./plugins/cpu_power;
     # GUI changes pulled back into the repo by update-noctalia-config.sh.
     # Files load alphabetically, so this layers over config.toml above: a key
     # set in both takes this file's value until it's deleted from here.
