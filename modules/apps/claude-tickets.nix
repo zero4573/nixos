@@ -30,6 +30,13 @@ _: {
     # server name the vaults' ticket sources use.
     paidRovoTools = server: map (t: "mcp__${server}__${t}")
       [ "search" "getGraphContext" "getGraphObject" "addGraphContext" "getTeamworkGraphContext" ];
+    # Built-in tools ticket work never uses: a deny naming the whole tool
+    # drops its schema from the session's context (and its subagents'),
+    # which keeps every ticket session's startup smaller
+    unusedTools = [
+      "Artifact" "ArtifactCheck" "ArtifactComments" "ArtifactData"
+      "SendFeedback" "ShareOnboardingGuide"
+    ];
   in {
     programs.claude-tickets = {
       enable = true;
@@ -58,7 +65,7 @@ _: {
         "Bash(ct ws rm:*)"
         "Edit(.claude/settings.json)"
         "Write(.claude/settings.json)"
-      ] ++ paidRovoTools "atlassian";
+      ] ++ paidRovoTools "atlassian" ++ unusedTools;
 
       obsidian.vaults = [ "work" "personal" ];
     };
