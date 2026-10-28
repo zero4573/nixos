@@ -1,0 +1,27 @@
+id          = "local/sysmon_extra"
+name        = "Sysmon Extra"
+version     = "1.2.0"
+plugin_api  = 23 # readFileAsync
+author      = "local"
+icon        = "activity"
+description = "Bar graphs for stats the built-in sysmon widget lacks: CPU power and disk I/O."
+
+[[widget]]
+id    = "cpu_power"
+entry = "cpu_power.luau"
+
+  [[widget.setting]]
+  key       = "graph"
+  type      = "bool"
+  label_key = "settings.graph.label"
+  default   = true
+
+[[widget]]
+id    = "disk_io"
+entry = "disk_io.luau"
+
+  [[widget.setting]]
+  key       = "graph"
+  type      = "bool"
+  label_key = "settings.graph.label"
+  default   = true

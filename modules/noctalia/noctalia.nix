@@ -1,6 +1,7 @@
 _: {
-  # Feeds the cpu_power plugin: samples the root-only RAPL energy counter and
-  # publishes a coarse wattage history to /run/cpu-power/watts (./cpu-power.sh).
+  # Feeds the sysmon_extra cpu_power widget: samples the root-only RAPL energy
+  # counter and publishes a coarse wattage history to /run/cpu-power/watts
+  # (./cpu-power.sh).
   flake.nixosModules.noctalia = { pkgs, ... }: {
     systemd.services.cpu-power = {
       description = "Publish CPU package power for the noctalia bar";
@@ -48,7 +49,7 @@ _: {
         position = "top";
         margin_ends = 0; # v5 insets the bar 100px from each end by default
         start = [ "tray" "workspaces" "media" ];
-        center = [ "temp" "cpu-power" "cpu" "gpu" "disk" "ram" "net-down" "net-up" ];
+        center = [ "temp" "cpu-power" "cpu" "gpu" "disk" "ram" "disk-io" "net-down" "net-up" ];
         end = [
           "battery" "brightness" "network" "bluetooth" "volume"
           "clock" "notifications" "control-center"
@@ -57,7 +58,9 @@ _: {
 
       # Each sysmon widget shows one stat; named entries let several coexist
       widget = {
-        cpu-power.type = "local/cpu_power:power"; # ./plugins/cpu_power
+        # ./plugins/sysmon_extra
+        cpu-power.type = "local/sysmon_extra:cpu_power";
+        disk-io.type = "local/sysmon_extra:disk_io";
         cpu = { type = "sysmon"; stat = "cpu_usage"; };
         gpu = { type = "sysmon"; stat = "gpu_usage"; };
         disk = { type = "sysmon"; stat = "disk_used_pct"; path = "/"; };
@@ -74,7 +77,7 @@ _: {
         };
       };
 
-      plugins.enabled = [ "local/cpu_power" ];
+      plugins.enabled = [ "local/sysmon_extra" ];
 
       # Graphs scroll at the fastest interval; keep every graphed group on it
       # (disk stays at its 10s default, it's shown as a number)
@@ -112,7 +115,7 @@ _: {
 
     xdg.configFile."noctalia/config.toml".source = config;
     # Plugins under the data dir are discovered as the built-in "local" source
-    xdg.dataFile."noctalia/plugins/cpu_power".source = ./plugins/cpu_power;
+    xdg.dataFile."noctalia/plugins/sysmon_extra".source = ./plugins/sysmon_extra;
     # GUI changes pulled back into the repo by update-noctalia-config.sh.
     # Files load alphabetically, so this layers over config.toml above: a key
     # set in both takes this file's value until it's deleted from here.

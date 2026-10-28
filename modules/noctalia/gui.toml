@@ -3,7 +3,7 @@
 # (see noctalia.nix); remove a key here to hand it back to Nix.
 
 [bar.main]
-center = [ "disk", "cpu-power", "temp", "cpu", "gpu", "ram", "net-down", "net-up", "sysmon" ]
+center = [ "disk", "cpu-power", "temp", "cpu", "gpu", "ram", "disk-io", "net-down", "net-up", "sysmon" ]
 end = [ "bluetooth", "network", "battery", "brightness", "volume", "clock", "settings" ]
 
 [lockscreen_widgets]
@@ -51,9 +51,9 @@ history_retention_hours = 1
 format = "{:%a %b %e} {:%H:%M}"
 
 [widget.cpu]
-custom_label = "CPU"
+custom_label = ""
 interactive = false
-show_glyph = false
+show_glyph = true
 visualization = "graph"
 
 [widget.cpu-power]
@@ -63,9 +63,10 @@ interactive = false
 interactive = false
 
 [widget.gpu]
-custom_label = "GPU"
+custom_label = ""
+glyph = "gpu-usage"
 interactive = false
-show_glyph = false
+show_glyph = true
 visualization = "graph"
 
 [widget.net-down]
@@ -77,9 +78,9 @@ interactive = false
 visualization = "graph"
 
 [widget.ram]
-custom_label = "RAM"
+custom_label = ""
 interactive = false
-show_glyph = false
+show_glyph = true
 visualization = "graph"
 
 [widget.sysmon]
