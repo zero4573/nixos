@@ -33,6 +33,7 @@
           self.homeModules.claudeSandbox
           self.homeModules.npmSandbox
           self.homeModules.sandboxProxy
+          self.homeModules.gitSshBroker
           self.homeModules.aiSandboxSlice
           inputs.claude-tickets.homeModules.claudeTickets
           self.homeModules.claudeTicketsSetup
