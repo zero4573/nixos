@@ -67,6 +67,9 @@ _: {
       permissions = {
         deny = [
           "Bash(rm -rf:*)"
+          # On the host (claude-open) pushing stays denied: there it would
+          # use your full SSH agent. The sandbox lifts it (its managed
+          # settings), pushing through git-ssh-broker.
           "Bash(git push:*)"
           "Bash(*DROP TABLE*)"
           "Bash(truncate:*)"

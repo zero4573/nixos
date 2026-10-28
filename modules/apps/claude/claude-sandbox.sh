@@ -64,9 +64,10 @@ What the session can see and change follows Claude's own settings:
   * /nix/store, ~/.claude (its settings, skills and agents read-only), and
     any vault's .obsidian/ read-only
   * container-only managed settings at /etc/claude-code/managed-settings.json
-    that allow kill, pkill, killall, rm, rmdir and unlink; the user settings'
-    denies of the same rules (rm -rf) are dropped in the container (the
-    host's settings are unchanged)
+    that allow kill, pkill, killall, rm, rmdir, unlink and git push, and deny
+    force pushes and deletes; the user settings' denies of the allowed rules
+    (rm -rf, git push) are dropped in the container (the host's settings are
+    unchanged)
   * the host nix-daemon's socket directory (/nix/var/nix/daemon-socket),
     when it exists, with NIX_REMOTE=daemon: `nix eval` and `nix flake check
     --no-build` work in the sandbox. Trade-off: anything in the sandbox can
@@ -79,6 +80,11 @@ What the session can see and change follows Claude's own settings:
     can't tell, it does not mount it either (fails closed) and warns;
     CLAUDE_SANDBOX_NIX_DAEMON=1 mounts it anyway in that case (a known-
     trusted user never gets it)
+  * git over SSH through git-ssh-broker, started on the host for the
+    session: fetch and push to GitHub/Bitbucket with your host ssh setup,
+    but never a force push, a branch/tag delete or a tag move (do those on
+    the host); commits are signed through its git-signatures-only agent
+    with the configured signing keys (unsigned without a host agent)
   * a main clone's .git given read-write keeps its config and hooks
     read-only, so `git branch -d` there prints "could not write config
     file ... Device or resource busy" (it tries to drop the branch's
@@ -190,9 +196,11 @@ cleanup() {
     log_line "session ended (exit $code)" >/dev/null
   fi
   [[ -n "${dbus_proxy_pid:-}" ]] && kill "$dbus_proxy_pid" 2>/dev/null || true
+  [[ -n "${git_broker_pid:-}" ]] && kill "$git_broker_pid" 2>/dev/null || true
   [[ -n "${pod_name:-}" ]] && podman pod rm -f -t 5 "$pod_name" >/dev/null 2>&1 || true
   [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]] && rm -rf "$tmp_dir"
   [[ -n "${dbus_proxy_dir:-}" && -d "$dbus_proxy_dir" ]] && rm -rf "$dbus_proxy_dir"
+  [[ -n "${git_broker_dir:-}" && -d "$git_broker_dir" ]] && rm -rf "$git_broker_dir"
   return 0  # under set -e, a false last test above would become the exit status
 }
 trap cleanup EXIT
@@ -283,6 +291,67 @@ if [[ "$real_bus_address" == unix:path=* || "$real_bus_address" == unix:abstract
     warn "DBus notification proxy didn't come up, sandbox notifications will be unavailable"
     kill "$dbus_proxy_pid" 2>/dev/null || true
     dbus_proxy_pid=""
+  fi
+fi
+
+# Git over SSH and commit signing: git-ssh-broker (modules/apps/git-ssh-broker)
+# runs here on the host for this session and its sockets are mounted in. The
+# git socket carries git's transport commands to GitHub/Bitbucket through the
+# host's ssh, refusing force pushes and branch/tag deletes; the agent socket
+# signs git signatures only, with the signing keys (CLAUDE_SANDBOX_SIGNING_KEYS,
+# public halves mounted read-only), through the host's agent (SSH_AUTH_SOCK,
+# else GIT_SSH_BROKER_UPSTREAM_AGENT). No SSH key or agent of the host is
+# ever reachable from the sandbox itself. Without signing keys or an agent,
+# sessions still push, and commit unsigned.
+git_mounts=()
+git_env_flags=()
+git_signing=0
+if [[ -n "${GIT_SSH_BROKER:-}" ]]; then
+  git_broker_dir="$(mktemp -d)"
+  broker_args=(serve --git-socket "$git_broker_dir/git.sock")
+  [[ -n "${GIT_SSH_BROKER_SSH:-}" ]] && broker_args+=(--ssh "$GIT_SSH_BROKER_SSH")
+  upstream_agent="${SSH_AUTH_SOCK:-${GIT_SSH_BROKER_UPSTREAM_AGENT:-}}"
+  upstream_agent="${upstream_agent/#\~/$HOME}"
+  signing_keys=()
+  IFS=':' read -ra configured_keys <<< "${CLAUDE_SANDBOX_SIGNING_KEYS:-}"
+  for k in "${configured_keys[@]}"; do
+    k="${k/#\~/$HOME}"
+    [[ -n "$k" && -f "$k" ]] && signing_keys+=("$k")
+  done
+  if [[ ${#signing_keys[@]} -gt 0 && -S "$upstream_agent" ]]; then
+    broker_args+=(--agent-socket "$git_broker_dir/agent.sock" --upstream-agent "$upstream_agent")
+    for k in "${signing_keys[@]}"; do broker_args+=(--signing-key "$k"); done
+  elif [[ ${#signing_keys[@]} -gt 0 ]]; then
+    warn "no ssh-agent at '$upstream_agent': sessions commit unsigned"
+  fi
+
+  log "starting git-ssh-broker (its log: $launch_log)"
+  "$GIT_SSH_BROKER" "${broker_args[@]}" 2>> "$launch_log" &
+  git_broker_pid=$!
+  for _ in $(seq 1 50); do
+    [[ -S "$git_broker_dir/git.sock" ]] && break
+    sleep 0.1
+  done
+
+  if [[ -S "$git_broker_dir/git.sock" ]]; then
+    git_mounts+=(-v "$git_broker_dir/git.sock:$git_broker_dir/git.sock")
+    git_env_flags+=(
+      -e "GIT_SSH_COMMAND=$GIT_SSH_BROKER client"
+      -e GIT_SSH_VARIANT=ssh
+      -e "GIT_SSH_BROKER_SOCKET=$git_broker_dir/git.sock"
+    )
+    if [[ -S "$git_broker_dir/agent.sock" ]]; then
+      git_signing=1
+      git_mounts+=(-v "$git_broker_dir/agent.sock:$git_broker_dir/agent.sock")
+      git_env_flags+=(-e "SSH_AUTH_SOCK=$git_broker_dir/agent.sock")
+      for k in "${signing_keys[@]}"; do git_mounts+=(-v "$k:$k:ro"); done
+      # git log --show-signature / %G? verify against it (modules/apps/git.nix)
+      [[ -f "$HOME/.ssh/allowed_signers" ]] && git_mounts+=(-v "$HOME/.ssh/allowed_signers:$HOME/.ssh/allowed_signers:ro")
+    fi
+  else
+    warn "git-ssh-broker didn't come up: no git over SSH in this session"
+    kill "$git_broker_pid" 2>/dev/null || true
+    git_broker_pid=""
   fi
 fi
 
@@ -859,9 +928,15 @@ tty_flags=(-i)
 [[ -t 0 && -t 1 ]] && tty_flags=(-it)
 
 # Git: the host's global config (a /nix/store file, with its per-remote
-# identity includes), so commits made here carry the right author. Signing is
-# off: the sandbox has no SSH agent, and no allowed-signers file to show
-# signatures with; sign the commits on the host afterwards.
+# identity includes), so commits made here carry the right author and are
+# signed through git-ssh-broker's agent. Without that agent, signing is
+# turned off, so commits still work (unsigned).
+git_config=(core.excludesFile "$GIT_GLOBAL_IGNORE" log.showSignature false)
+[[ "$git_signing" == 1 ]] || git_config+=(commit.gpgSign false tag.gpgSign false)
+git_config_flags=(-e "GIT_CONFIG_COUNT=$(( ${#git_config[@]} / 2 ))")
+for (( i = 0; i < ${#git_config[@]}; i += 2 )); do
+  git_config_flags+=(-e "GIT_CONFIG_KEY_$(( i / 2 ))=${git_config[i]}" -e "GIT_CONFIG_VALUE_$(( i / 2 ))=${git_config[i + 1]}")
+done
 #
 # Nested podman's storage gets an anonymous volume (removed with the
 # container): on the container's own overlayfs root, overlay mounts in it
@@ -908,17 +983,13 @@ podman run --rm "${tty_flags[@]}" \
   "${nix_mounts[@]}" \
   "${protect_mounts[@]}" \
   "${dbus_mounts[@]}" \
+  "${git_mounts[@]}" \
   -e HOME="$HOME" \
   -e ASDF_DATA_DIR="$asdf_data_dir" \
   -e SSL_CERT_FILE="$CACERT_BUNDLE" \
   -e GIT_CONFIG_GLOBAL="$GIT_GLOBAL_CONFIG" \
-  -e GIT_CONFIG_COUNT=3 \
-  -e GIT_CONFIG_KEY_0=core.excludesFile \
-  -e GIT_CONFIG_VALUE_0="$GIT_GLOBAL_IGNORE" \
-  -e GIT_CONFIG_KEY_1=commit.gpgSign \
-  -e GIT_CONFIG_VALUE_1=false \
-  -e GIT_CONFIG_KEY_2=log.showSignature \
-  -e GIT_CONFIG_VALUE_2=false \
+  "${git_config_flags[@]}" \
+  "${git_env_flags[@]}" \
   -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \

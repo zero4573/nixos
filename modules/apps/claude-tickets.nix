@@ -38,10 +38,13 @@ _: {
       container = "podman";
       systemdSlice = "aisandbox.slice";
 
-      # Ticket and kb sessions commit on their branches (unsigned; `ct ws
-      # sign` on the host), but never push, reset, force-delete branches,
-      # clean, remove the ticket workspace (`ct ws rm`), nor call the paid
-      # Rovo tools. The lead does add and remove git worktrees: each task
+      # Ticket and kb sessions commit on their branches, signed through
+      # git-ssh-broker's agent, and push them (`/tickets:save` pushes the
+      # feature branches) through the broker, which refuses force pushes and
+      # branch/tag deletes: those, like the managed-settings denies of them
+      # (claude-sandbox.nix), are your manual steps on the host. Sessions
+      # never reset, force-delete branches, clean, remove the ticket
+      # workspace (`ct ws rm`), nor call the paid Rovo tools. The lead does add and remove git worktrees: each task
       # runs in its own worktree under the ticket workspace's `.tasks/`, and
       # once its branch is merged into the ticket branch the worktree is
       # removed and the branch deleted with `git branch -d` (merged branches
@@ -49,7 +52,6 @@ _: {
       # (the sandbox mounts Edit/Write denies read-only), so a session can't
       # relax these.
       sessionSettings.permissions.deny = [
-        "Bash(git push:*)"
         "Bash(git reset --hard:*)"
         "Bash(git branch -D:*)"
         "Bash(git clean:*)"

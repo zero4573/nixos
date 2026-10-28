@@ -27,9 +27,10 @@ modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
 modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
 modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, ...)
 modules/apps/claude/            claude-code (settings, hooks, skills/, agents/), claude-sandbox: `claude` sandboxed by default, `claude-open` plain (+ sidecar/setup scripts; every sandboxed session gets the graphify sidecar and `extraMcpServers`, e.g. fff)
-                                 flake check `claude-sandbox` (`claude-sandbox-check.nix`): shellcheck + `claude-sandbox-test.sh` (stubbed launch, asserts the mount list) and `claude-sandbox-self-check-test.sh`; run the test directly with `bash modules/apps/claude/claude-sandbox-test.sh`
+                                 flake check `claude-sandbox` (`claude-sandbox-check.nix`): shellcheck + `claude-sandbox-test.sh` (stubbed launch, asserts the mount list) and `claude-sandbox-self-check-test.sh`; run the test directly with `bash modules/apps/claude/claude-sandbox-test.sh` (its git-ssh-broker cases run when `GIT_SSH_BROKER` points at a broker binary)
 modules/apps/npm-sandbox/       npm-sandbox.nix + its script
 modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy
+modules/apps/git-ssh-broker/    git over SSH + commit signing for claude-sandbox (Go source in src/, package `.#git-ssh-broker`): one per session on the host; pushes go through the host's ssh/1Password agent, force pushes and branch/tag deletes refused; its agent signs git signatures only
 modules/apps/claude-tickets.nix wires the claude-tickets flake input (ticket workflow + Obsidian vaults, its own repo) to this machine: sandbox, sandbox-proxy MCP, session rules
 modules/apps/{zed,zsh}/         app module + its config files
 modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,intune}.nix
@@ -92,6 +93,8 @@ bash modules/apps/claude/claude-sandbox-self-check-test.sh   # sandbox-self-chec
 bash modules/apps/asdf/asdf-gcroots-test.sh       # asdf GC roots (minimal PATH)
 shellcheck -s bash modules/apps/claude/*.sh modules/apps/asdf/*.sh
 nix build .#checks.x86_64-linux.claude-sandbox .#checks.x86_64-linux.asdf-gcroots
+nix build .#git-ssh-broker                         # runs the broker's Go tests (real git push + ssh-agent)
+(cd modules/apps/git-ssh-broker/src && go test ./...)
 ```
 
 `<host>` is one of `framework-work`, `framework-personal`, `vm`. Only `vm` can

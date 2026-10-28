@@ -23,7 +23,7 @@ _: {
   #   npm-sandbox's install scripts can't reach it). Anything running inside
   #   a claude-sandbox (the agent, a package install script, a nested
   #   container) can call it as you, so each token's scopes are the real limit:
-  #   keep them read-only.
+  #   keep them read-only, but for ticket creation if you want it (below).
   #   - `sandbox-proxy mcp add <name> --url <url> --op-item <item> [--auth basic|bearer]`
   #     registers a remote streamable-HTTP MCP server (config, no secrets, in
   #     ~/.config/sandbox-proxy/mcp-servers.json). The 1Password item holds
@@ -38,8 +38,13 @@ _: {
   #          Jira and Bitbucket) with only read:jira:agent-interface,
   #          search:jira:agent-interface, read:me, read:account and
   #          read:bitbucket:agent-interface, never write:bitbucket:agent-interface
-  #          (read-only; Rovo hides the tools a token has no scope for, an
-  #          unscoped legacy token only gets Teamwork Graph tools, and
+  #          (Bitbucket stays read-only: code goes through git-ssh-broker,
+  #          which refuses force pushes and deletes). Optionally add
+  #          write:jira:agent-interface so sessions can create tickets
+  #          (claude-tickets asks you to confirm the source and contents
+  #          first); without it Jira stays read-only. (Rovo hides the tools
+  #          a token has no scope for, an unscoped legacy token only gets
+  #          Teamwork Graph tools, and
   #          without read:me / read:account every Jira call fails with
   #          "Failed to fetch accessible products: 401"). An org admin must
   #          also allow you to use API-token auth. Store it in a 1Password

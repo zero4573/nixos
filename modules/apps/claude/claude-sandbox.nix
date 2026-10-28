@@ -114,13 +114,26 @@
     nestedPodmanSetup = pkgs.writeShellScript "claude-sandbox-nested-podman-setup"
       (builtins.readFile ./claude-sandbox-nested-podman-setup.sh);
 
-    # The allow rules of the managed settings below (kill commands, and
-    # deleting files: the launcher also drops the user settings' matching
-    # denies, such as rm -rf, in the container); claude-sandbox-self-check
-    # compares the mounted file against this same list, so they can't drift.
+    # The allow rules of the managed settings below (kill commands, deleting
+    # files, and git push: the launcher also drops the user settings' matching
+    # denies, such as rm -rf and git push, in the container);
+    # claude-sandbox-self-check compares the mounted file against this same
+    # list, so they can't drift.
     sandboxAllowRules = [
       "Bash(kill:*)" "Bash(pkill:*)" "Bash(killall:*)"
       "Bash(rm:*)" "Bash(rm -rf:*)" "Bash(rmdir:*)" "Bash(unlink:*)"
+      "Bash(git push:*)"
+    ];
+    # Pushes go through git-ssh-broker (modules/apps/git-ssh-broker), which
+    # refuses force pushes and branch/tag deletes whatever the command line
+    # says; these denies only make Claude stop and ask you to do them on the
+    # host instead of trying. (A `:branch` refspec delete has no rule: `:*`
+    # is the rules' prefix syntax. The broker refuses it all the same.)
+    sandboxDenyRules = [
+      "Bash(git push --force:*)" "Bash(git push -f:*)" "Bash(git push --force-with-lease:*)"
+      "Bash(git push --delete:*)" "Bash(git push -d:*)" "Bash(git push --mirror:*)" "Bash(git push --prune:*)"
+      "Bash(git push * --force*)" "Bash(git push * -f*)" "Bash(git push * --delete*)" "Bash(git push * -d *)"
+      "Bash(git push * --mirror*)" "Bash(git push * --prune*)" "Bash(git push * +*)"
     ];
     # Commands the self-check expects on the sandbox PATH (devToolsEnv below)
     expectedTools = [ "git" "jj" "ssh-keygen" "kill" "pkill" "killall" "rg" "jq" "nix" ];
@@ -188,11 +201,13 @@
 
     # Managed settings for the container only (mounted read-only at
     # /etc/claude-code/managed-settings.json): allow rules so Claude Code's
-    # permission layer doesn't stop kill commands or file deletes inside the
-    # sandbox. The host's settings are untouched.
+    # permission layer doesn't stop kill commands, file deletes or pushes
+    # inside the sandbox, and denies for force pushes and deletes, which no
+    # other settings file can lift. The host's settings are untouched.
     managedSettings = pkgs.writeText "claude-sandbox-managed-settings.json"
       (builtins.toJSON {
         permissions.allow = sandboxAllowRules;
+        permissions.deny = sandboxDenyRules;
       });
 
     # One launcher, installed as claude and as claude-sandbox (whose --help
@@ -225,6 +240,10 @@
         export GRAPHIFY_INSTALL=${graphifyInstallScript}
         export EXTRA_MCP_CONFIG=${lib.escapeShellArg extraMcpConfig}
         export CLAUDE_GIT_UPDATE=${gitUpdate}
+        export GIT_SSH_BROKER=${lib.getExe' config.programs.gitSshBroker.package "git-ssh-broker"}
+        export GIT_SSH_BROKER_SSH=${lib.getExe' pkgs.openssh "ssh"}
+        export GIT_SSH_BROKER_UPSTREAM_AGENT=${lib.escapeShellArg config.programs.gitSshBroker.upstreamAgent}
+        export CLAUDE_SANDBOX_SIGNING_KEYS=${lib.escapeShellArg (lib.concatStringsSep ":" config.programs.gitSshBroker.signingKeys)}
         export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
         export GIT_GLOBAL_CONFIG=${config.xdg.configFile."git/config".source}
         export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt

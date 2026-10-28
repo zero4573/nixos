@@ -83,6 +83,7 @@ run_case() {
   MANAGED_SETTINGS="${managed_settings-/nix/store/fake-managed-settings.json}" \
   ASDF_VM_BIN=/nix/store/fake-asdf/bin \
   CLAUDE_GIT_UPDATE="$stubs/git-update" \
+  GIT_SSH_BROKER="${git_ssh_broker:-}" \
   GIT_GLOBAL_IGNORE=/nix/store/fake-ignore \
   GIT_GLOBAL_CONFIG=/nix/store/fake-gitconfig \
   CACERT_BUNDLE=/nix/store/fake-ca.crt \
@@ -291,6 +292,47 @@ mkdir -p "$home/.claude"
 echo '{"permissions":{"deny":["Bash(rm -rf:*)"]}}' > "$home/.claude/settings.json"
 run_case unfiltered
 assert_mount unfiltered "$home/.claude/settings.json:$home/.claude/settings.json:ro" "no readable managed settings: the user settings as they are"
+
+# 15. git-ssh-broker (GIT_SSH_BROKER, a real broker when the test is given
+# one): its git socket is mounted with GIT_SSH_COMMAND; with a signing key
+# and a host agent, the agent socket too, the key read-only, and signing
+# stays on. Without the broker, signing is off.
+gitenv() { grep -E '^(GIT_|SSH_AUTH_SOCK=)' "$root/out-$1/run.args" || true; }
+new_home nobroker
+run_case nobroker
+if gitenv nobroker | grep -qx 'GIT_CONFIG_KEY_2=commit.gpgSign' && gitenv nobroker | grep -qx 'GIT_CONFIG_VALUE_2=false'; then
+  ok "no broker: commit signing is off"
+else
+  fail "no broker: signing not turned off: $(gitenv nobroker)"
+fi
+if gitenv nobroker | grep -q '^GIT_SSH_COMMAND='; then fail "no broker: GIT_SSH_COMMAND set"; else ok "no broker: no GIT_SSH_COMMAND"; fi
+if [[ -n "${GIT_SSH_BROKER:-}" ]] && command -v ssh-agent >/dev/null && command -v ssh-keygen >/dev/null; then
+  new_home broker
+  mkdir -p "$home/.ssh"
+  ssh-keygen -q -t ed25519 -N '' -f "$home/.ssh/work" >/dev/null
+  touch "$home/.ssh/allowed_signers"
+  ssh-agent -D -a "$root/agent.sock" >/dev/null 2>&1 &
+  agent_pid=$!
+  for _ in $(seq 1 50); do [[ -S "$root/agent.sock" ]] && break; sleep 0.1; done
+  git_ssh_broker="$GIT_SSH_BROKER" SSH_AUTH_SOCK="$root/agent.sock" CLAUDE_SANDBOX_SIGNING_KEYS="$home/.ssh/work.pub:$home/.ssh/missing.pub" \
+    run_case broker
+  kill "$agent_pid" 2>/dev/null || true
+  if mounts broker | grep -qE '/git\.sock:.*/git\.sock$'; then ok "broker: git socket mounted"; else fail "broker: no git socket mount: $(mounts broker)"; fi
+  if mounts broker | grep -qE '/agent\.sock:.*/agent\.sock$'; then ok "broker: agent socket mounted"; else fail "broker: no agent socket mount: $(mounts broker)"; fi
+  assert_mount broker "$home/.ssh/work.pub:$home/.ssh/work.pub:ro" "broker: signing key mounted read-only"
+  assert_mount broker "$home/.ssh/allowed_signers:$home/.ssh/allowed_signers:ro" "broker: allowed signers mounted read-only"
+  assert_no_mount broker "$home/.ssh/missing.pub:$home/.ssh/missing.pub:ro" "broker: a missing key is skipped"
+  if gitenv broker | grep -qx "GIT_SSH_COMMAND=$GIT_SSH_BROKER client" && gitenv broker | grep -qx 'GIT_SSH_VARIANT=ssh' \
+    && gitenv broker | grep -qE '^SSH_AUTH_SOCK=.*/agent\.sock$'; then
+    ok "broker: GIT_SSH_COMMAND and SSH_AUTH_SOCK point at the broker"
+  else
+    fail "broker: env: $(gitenv broker)"
+  fi
+  if gitenv broker | grep -q 'gpgSign'; then fail "broker: signing turned off: $(gitenv broker)"; else ok "broker: signing stays on"; fi
+  if mounts broker | grep -q '\.1password\|/run/user'; then fail "broker: a host agent is mounted: $(mounts broker)"; else ok "broker: no host agent mounted"; fi
+else
+  echo "skip: broker cases (set GIT_SSH_BROKER to a git-ssh-broker binary; needs ssh-agent, ssh-keygen)"
+fi
 
 if (( failures > 0 )); then
   echo "$failures check(s) failed" >&2
