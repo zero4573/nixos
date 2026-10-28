@@ -39,7 +39,7 @@
     };
   };
 
-  flake.homeModules.gitSshBroker = { pkgs, lib, osConfig, ... }: {
+  flake.homeModules.gitSshBroker = { pkgs, lib, config, osConfig, ... }: {
     options.programs.gitSshBroker = {
       package = lib.mkOption {
         type = lib.types.package;
@@ -66,10 +66,11 @@
 
       upstreamAgent = lib.mkOption {
         type = lib.types.str;
-        default = "~/.1password/agent.sock";
+        default = "${config.home.homeDirectory}/.1password/agent.sock";
+        defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/.1password/agent.sock"'';
         description = ''
           The host's ssh-agent socket the signing filter forwards to, when the
-          launching shell has no SSH_AUTH_SOCK (~ is expanded at launch).
+          launching shell has no SSH_AUTH_SOCK.
         '';
       };
     };
