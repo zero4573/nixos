@@ -1,24 +1,43 @@
 _: {
   flake.homeModules.claudeCode = { pkgs, lib, ... }:
   let
-    # Desktop-notifies via notify-send. Reads the hook's JSON payload
-    # from stdin for an optional `.message` and `.cwd` (falls back to $1 /
-    # a generic title when absent, e.g. for the Stop event). Baked as an
-    # absolute /nix/store path, so this also works unmodified inside
+    # Desktop-notifies via notify-send when a session needs you: a question
+    # (PreToolUse AskUserQuestion), a permission or elicitation prompt, or
+    # idle and waiting for your reply (Notification). Once per session until
+    # you answer or send a prompt (`clear`, from UserPromptSubmit and
+    # PostToolUse AskUserQuestion), critical and without expiry so it stays
+    # on screen until dismissed. Sessions in a ct workspace (a workspace.json
+    # with an id at or above the cwd) are left to ct's own hook, which also
+    # knows not to ping while the ticket's agents are still running. Baked
+    # as an absolute /nix/store path, so this also works unmodified inside
     # claude-sandbox, which bind-mounts /nix/store read-only and shares this
     # same settings.json with the host.
     notifyScript = pkgs.writeShellScript "claude-code-notify" ''
-      set -euo pipefail
-      default_message="''${1:-Claude Code}"
+      set -uo pipefail
+      jq=${lib.getExe pkgs.jq}
       input="$(cat)"
-      cwd="$(${lib.getExe pkgs.jq} -r '.cwd // empty' <<<"$input" 2>/dev/null || true)"
-      message="$(${lib.getExe pkgs.jq} -r --arg d "$default_message" '.message // $d' <<<"$input" 2>/dev/null || echo "$default_message")"
-      title="Claude Code"
-      # The session's folder (a ticket workspace is named after its ticket)
-      if [[ -n "$cwd" ]]; then
-        title="Claude Code ($(basename "$cwd"))"
+      field() { "$jq" -r "$1 // empty" <<<"$input" 2>/dev/null || true; }
+      session="$(field .session_id)"
+      flag_dir="''${XDG_RUNTIME_DIR:-/tmp}/claude-code-notify"
+      flag="$flag_dir/''${session:-unknown}"
+      if [[ "''${1:-}" == clear ]]; then
+        rm -f "$flag"
+        exit 0
       fi
-      ${lib.getExe' pkgs.libnotify "notify-send"} -a "Claude Code" "$title" "$message" || true
+      cwd="$(field .cwd)"
+      d="$cwd"
+      while [[ -n "$d" && "$d" != / ]]; do
+        "$jq" -e '.id // empty' "$d/workspace.json" >/dev/null 2>&1 && exit 0
+        d="$(dirname "$d")"
+      done
+      [[ -e "$flag" ]] && exit 0
+      mkdir -p "$flag_dir" && : >"$flag"
+      message="$(field '.tool_input.questions[0].question')"
+      [[ -n "$message" ]] || message="$(field .message)"
+      [[ -n "$message" ]] || message="needs you"
+      title="Claude Code"
+      [[ -n "$cwd" ]] && title="Claude Code ($(basename "$cwd"))"
+      ${lib.getExe' pkgs.libnotify "notify-send"} -a "Claude Code" -u critical -t 0 "$title" "$message" || true
     '';
 
     # SessionStart: when the session has a `graphify` MCP server (code graph
@@ -53,6 +72,9 @@ _: {
       verbose = true;
       useAutoModeDuringPlan = true;
       notifications = true;
+      # Claude Code's own terminal notifications (bell / OSC) off: the
+      # hooks below are the one notifier
+      preferredNotifChannel = "notifications_disabled";
       autoUpdate = false;
       # Transcripts are what `claude --continue` resumes (e.g. a ticket
       # session restarted by `ct start`); keep them longer than the 30-day
@@ -103,11 +125,20 @@ _: {
           SessionStart = [
             { matcher = ""; hooks = [ (cmd "${graphifyContextScript}") ]; }
           ];
+          # Only when you're needed: no ping when a turn ends (a ticket
+          # session's turns end on every agent notice), nor for other
+          # notification types
           Notification = [
-            { matcher = ""; hooks = [ (cmd "${notifyScript}") ]; }
+            { matcher = "permission_prompt|elicitation_dialog|idle_prompt"; hooks = [ (cmd "${notifyScript}") ]; }
           ];
-          Stop = [
-            { matcher = ""; hooks = [ (cmd ''${notifyScript} "Finished responding"'') ]; }
+          PreToolUse = [
+            { matcher = "AskUserQuestion"; hooks = [ (cmd "${notifyScript}") ]; }
+          ];
+          PostToolUse = [
+            { matcher = "AskUserQuestion"; hooks = [ (cmd "${notifyScript} clear") ]; }
+          ];
+          UserPromptSubmit = [
+            { matcher = ""; hooks = [ (cmd "${notifyScript} clear") ]; }
           ];
         };
     };

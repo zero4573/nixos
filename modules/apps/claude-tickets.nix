@@ -60,6 +60,11 @@ _: {
       # only; -D stays denied). Their workspace settings file stays read-only
       # (the sandbox mounts Edit/Write denies read-only), so a session can't
       # relax these.
+      # Ticket sessions compact by themselves just past ct's last context
+      # warning (250k tokens): the PO checkpoints its board and relay at
+      # the warnings (/tickets:po-refresh), so nothing is lost, and ct's
+      # SessionStart hook resumes it from the board afterwards
+      sessionSettings.autoCompactWindow = 260000;
       sessionSettings.permissions.deny = [
         "Bash(git reset --hard:*)"
         "Bash(git branch -D:*)"
