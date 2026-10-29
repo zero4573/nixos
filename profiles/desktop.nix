@@ -17,6 +17,8 @@
       # Applications
       self.nixosModules.browsers
       self.nixosModules.terminals
+      self.nixosModules.herdr
+      self.nixosModules.ttt
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.joplin
