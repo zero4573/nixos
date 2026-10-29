@@ -131,5 +131,8 @@ here, on top of the sandboxed `claude` (`modules/apps/claude/claude-sandbox.nix`
 - [Architecture](./docs/architecture.md): hosts, profiles, modules and the sandboxed tooling
 - [claude-sandbox](./docs/claude-sandbox.md): how `claude` launches, mounts, nix-daemon trust, `.tool-versions`, dev tools, kill and delete allow, self-check
 - [sandbox-proxy](./docs/sandbox-proxy.md): the credential broker for registries and MCP servers
+- [claude-notifications](./docs/claude-notifications.md): the desktop notifier hooks for Claude Code sessions
+- [claude-tickets](./docs/claude-tickets.md): the claude-tickets flake input wired to the sandbox, session rules, `ctd`
+- [terminal-tools](./docs/terminal-tools.md): herdr and ttt, and how the ttt plugin is linked
 - [asdf-gcroots](./docs/asdf-gcroots.md): why and how asdf installs are rooted against garbage collection
 - [Building and checking](./docs/building-and-checking.md): evaluation, builds, script checks

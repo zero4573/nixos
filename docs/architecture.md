@@ -56,6 +56,9 @@ flowchart LR
 | claude-sandbox | `modules/apps/claude/` | [claude-sandbox](./claude-sandbox.md) |
 | sandbox-proxy | `modules/apps/sandbox-proxy/` | [sandbox-proxy](./sandbox-proxy.md) |
 | asdf-gcroots | `modules/apps/asdf/` | [asdf-gcroots](./asdf-gcroots.md) |
+| claude-code settings and hooks | `modules/apps/claude/claude-code.nix` | [claude-notifications](./claude-notifications.md) |
+| claude-tickets wiring | `modules/apps/claude-tickets.nix` | [claude-tickets](./claude-tickets.md) |
+| herdr and ttt | `modules/apps/herdr.nix`, `ttt.nix` | [terminal-tools](./terminal-tools.md) |
 | checks and builds | `flake.nix`, `*-check.nix` | [building-and-checking](./building-and-checking.md) |
 
 `npm-sandbox` (`modules/apps/npm-sandbox/`) is the sibling sandbox for npm

@@ -48,10 +48,33 @@ What the session can touch follows Claude's own settings, not sandbox flags:
   read-write directory (the most specific path wins), files named by
   `--settings`, `--mcp-config`, `--plugin-dir` and `--*system-prompt-file`, and
   `programs.claudeSandbox.readOnlyPaths`;
+- a deny rule with a `*` component (`a/*/*/*`, one clone per match) also makes the
+  directory before the first whole-component `*` read-only, so a session
+  can't create files at the levels in between or write into a clone made after
+  launch; existing matches are mounted read-only too (symlinks skipped). A
+  wildcard inside a name (`.env*`) never makes the project read-only, and a rule
+  with `**` inside the path is left to the permission rule alone;
 - `/nix/store` read-only, `~/.claude` read-write (its settings, filtered as in
   [Kill and delete commands](#kill-and-delete-commands), skills and agents
   read-only), the asdf data dir read-only, any vault's `.obsidian/`
   read-only.
+
+### Git directories under read-write mounts
+
+Every clone found up to four levels below a read-write directory
+(`<dir>/<provider>/<owner>/<repo>/.git`, symlinks not followed, read-only
+mounts skipped) gets `.git/hooks` and `.git/config` read-only. A worktree's
+`.git` file is read-only, and so are the `commondir` and `gitdir` files of
+existing worktrees (`.git/worktrees/` stays writable, so `git worktree add`
+works). A main clone whose `.git` has a `commondir` file is redirected already:
+the launcher warns and mounts its whole `.git` read-only. Without this a session
+could repoint git at a config of its own and run code on the host the next time
+git runs there. A clone made during the session is covered from the next launch.
+
+In a protected clone `git branch -d` warns "could not write config file"
+(the branch's config section can't be removed) but still deletes the ref;
+ticket tooling uses `git update-ref -d` after a merge check. The protection
+does not cover other config keys (filters, `sshCommand`, credential helpers).
 
 ## nix-daemon socket and trust
 

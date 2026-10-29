@@ -54,10 +54,11 @@ _: {
       # (claude-sandbox.nix), are your manual steps on the host. Sessions
       # never reset, force-delete branches, clean, remove the ticket
       # workspace (`ct ws rm`), nor call the paid Rovo tools. The lead does add and remove git worktrees: each task
-      # runs in its own worktree under the ticket workspace's `.tasks/`, and
+      # runs in its own worktree under the ticket workspace's `tasks/`, and
       # once its branch is merged into the ticket branch the worktree is
-      # removed and the branch deleted with `git branch -d` (merged branches
-      # only; -D stays denied). Their workspace settings file stays read-only
+      # removed and the branch ref deleted with `git update-ref -d` after an
+      # ancestry check (`git branch -d` would write the main clone's
+      # read-only config; -D stays denied). Their workspace settings file stays read-only
       # (the sandbox mounts Edit/Write denies read-only), so a session can't
       # relax these.
       # Ticket sessions compact by themselves just past ct's last context
