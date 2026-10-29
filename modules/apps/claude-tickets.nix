@@ -18,10 +18,12 @@ _: {
   #    fetched on the host first (`ct vault model fetch`), a missing
   #    cache is skipped with a log line
   #  * CLAUDE_SANDBOX_* set in the shell that runs `ct` reach that one
-  #    session's sandbox (claude-tickets-env.zsh)
+  #    session's sandbox: sessions run in the foreground of that shell, so
+  #    they inherit its environment (`CLAUDE_SANDBOX_PORTS=3000 ct start
+  #    PROJ-12`)
   #  * your session rules (sessionSettings below): what ticket and kb
-  #    sessions may never do, on top of claude-tickets' own (main clones
-  #    read-only)
+  #    sessions may never do, on top of claude-tickets' own (the graph
+  #    cache read-only; kb sessions also keep out of the repos)
   flake.homeModules.claudeTicketsSetup = { config, ... }:
   let
     # Atlassian Rovo MCP tools that consume Rovo credits (unified search,
@@ -76,10 +78,10 @@ _: {
     programs.claudeSandbox.passEnv = [ "CLAUDE_TICKETS_*" ];
     programs.claudeSandbox.readOnlyPaths = [ "${config.xdg.cacheHome}/claude-tickets/models" ];
 
-    # `CLAUDE_SANDBOX_PORTS=3000 ct start PROJ-12`: a zsh wrapper hands the
-    # shell's CLAUDE_SANDBOX_* to that one session (see the file)
+    # `ctd work|tickets|repos`: cd into the current vault's directories
+    # (`ct dir` prints them; a command can't change the shell's directory)
     programs.zsh.initContent = ''
-      source ${./claude-tickets-env.zsh}
+      ctd() { local d; d="$(ct dir "$@")" && cd "$d"; }
     '';
   };
 }
