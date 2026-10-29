@@ -141,6 +141,77 @@ assert_mount gitdir "$home/clone/.git:$home/clone/.git:rw" ".git is read-write"
 assert_mount gitdir "$home/clone/.git/config:$home/clone/.git/config:ro" ".git/config is read-only"
 assert_mount gitdir "$home/clone/.git/hooks:$home/clone/.git/hooks:ro" ".git/hooks is read-only"
 
+# 3b. A kb/teach-shaped session: a glob deny rule (dir/*/*/*/**) over the
+# projects root. The root is read-only (a session can't create files at the
+# levels between, or write into a clone made later), each repo already there
+# read-only too, a .git given read-write on its own for worktrees with config
+# and hooks read-only
+new_home projects
+mkdir -p "$home/Projects/github/acme/x/.git" "$proj/.claude"
+touch "$home/Projects/github/acme/x/.git/config"
+printf '{"permissions":{"deny":["Edit(/%s/*/*/*/**)"]}}\n' "$home/Projects" > "$proj/.claude/settings.json"
+run_case projects --add-dir "$home/Projects" --add-dir "$home/Projects/github/acme/x/.git"
+assert_mount projects "$home/Projects:$home/Projects:ro" "the projects root is read-only"
+assert_mount projects "$home/Projects/github/acme/x:$home/Projects/github/acme/x:ro" "a repo in it is read-only"
+assert_mount projects "$home/Projects/github/acme/x/.git:$home/Projects/github/acme/x/.git:rw" "its .git is read-write"
+assert_mount projects "$home/Projects/github/acme/x/.git/config:$home/Projects/github/acme/x/.git/config:ro" "its .git/config is read-only"
+assert_mount projects "$home/Projects/github/acme/x/.git/hooks:$home/Projects/github/acme/x/.git/hooks:ro" "its .git/hooks is read-only"
+
+# 3c. A ticket-shaped session: the repo directory as one writable mount, only
+# a cache deny. Clones already in it keep .git/hooks and .git/config
+# read-only; a worktree's .git file needs nothing; a symlinked .git is skipped
+new_home ticket
+mkdir -p "$home/Projects/github/acme/x/.git" "$home/Projects/github/acme/w" "$home/.cache/graph" "$proj/.claude"
+touch "$home/Projects/github/acme/x/.git/config"
+echo 'gitdir: /elsewhere' > "$home/Projects/github/acme/w/.git"
+mkdir -p "$home/Projects/github/acme/x/.git/worktrees/w" "$home/Projects/github/acme/real-git" "$home/Projects/github/acme/under/.git"
+touch "$home/Projects/github/acme/x/.git/worktrees/w/commondir" "$home/Projects/github/acme/x/.git/worktrees/w/gitdir"
+ln -s "$home/Projects/github/acme/real-git" "$home/Projects/github/acme/sym/.git" 2>/dev/null || { mkdir -p "$home/Projects/github/acme/sym"; ln -s "$home/Projects/github/acme/real-git" "$home/Projects/github/acme/sym/.git"; }
+mkdir -p "$home/Projects/github/acme/ro"/{.git,sub}
+touch "$home/Projects/github/acme/ro/.git/config"
+printf '{"permissions":{"deny":["Edit(/%s/.cache/graph/**)","Edit(/%s/Projects/github/acme/ro/**)"]}}\n' "$home" "$home" > "$proj/.claude/settings.json"
+run_case ticket --add-dir "$home/Projects"
+assert_mount ticket "$home/Projects:$home/Projects:rw" "the repo directory stays read-write"
+assert_mount ticket "$home/Projects/github/acme/x/.git/hooks:$home/Projects/github/acme/x/.git/hooks:ro" "a clone's .git/hooks is read-only"
+assert_mount ticket "$home/Projects/github/acme/x/.git/config:$home/Projects/github/acme/x/.git/config:ro" "a clone's .git/config is read-only"
+assert_no_mount ticket "$home/Projects/github/acme/w/.git/hooks:$home/Projects/github/acme/w/.git/hooks:ro" "a worktree has no hooks mount"
+assert_mount ticket "$home/Projects/github/acme/w/.git:$home/Projects/github/acme/w/.git:ro" "a worktree's .git file is read-only"
+assert_mount ticket "$home/Projects/github/acme/x/.git/worktrees/w/commondir:$home/Projects/github/acme/x/.git/worktrees/w/commondir:ro" "a worktree's commondir is read-only"
+assert_mount ticket "$home/Projects/github/acme/x/.git/worktrees/w/gitdir:$home/Projects/github/acme/x/.git/worktrees/w/gitdir:ro" "a worktree's gitdir is read-only"
+assert_no_mount ticket "$home/Projects/github/acme/x/.git/worktrees:$home/Projects/github/acme/x/.git/worktrees:ro" "worktrees/ itself stays writable"
+assert_no_mount ticket "$home/Projects/github/acme/sym/.git/hooks:$home/Projects/github/acme/sym/.git/hooks:ro" "a symlinked .git gets no hooks mount"
+assert_no_mount ticket "$home/Projects/github/acme/sym/.git/config:$home/Projects/github/acme/sym/.git/config:ro" "a symlinked .git gets no config mount"
+assert_no_mount ticket "$home/Projects/github/acme/ro/.git/hooks:$home/Projects/github/acme/ro/.git/hooks:ro" "a clone under a read-only deny path gets no hooks mount"
+assert_no_mount ticket "$home/Projects/github/acme/ro/.git/config:$home/Projects/github/acme/ro/.git/config:ro" "a clone under a read-only deny path gets no config mount"
+
+# 3e. A main clone with a commondir file is already redirected: warned about,
+# its whole .git read-only
+new_home commondir
+mkdir -p "$home/Projects/github/acme/c/.git"
+echo /evil > "$home/Projects/github/acme/c/.git/commondir"
+run_case commondir --add-dir "$home/Projects"
+assert_mount commondir "$home/Projects/github/acme/c/.git:$home/Projects/github/acme/c/.git:ro" "a .git with a commondir is read-only"
+if grep -q "c/.git has a commondir" "$root/out-commondir/stderr"; then ok "a commondir warns"; else fail "no commondir warning"; fi
+
+# 3f. A deny glob with a wildcard inside a name does not make the project read-only
+new_home dotenv
+mkdir -p "$proj/.claude"
+printf '{"permissions":{"deny":["Edit(.env*)"]}}\n' > "$proj/.claude/settings.json"
+touch "$proj/.env"
+run_case dotenv
+if grep -q 'mounts: project rw' "$root/out-dotenv/stderr"; then ok "Edit(.env*) leaves the project read-write"; else fail "project not rw: $(grep mounts: "$root/out-dotenv/stderr")"; fi
+assert_mount dotenv "$proj/.env:$proj/.env:ro" "the matching file is read-only"
+
+# 3d. Glob expansion keeps a clone path with a space whole and skips a symlink
+new_home spaced
+mkdir -p "$home/Projects/github/acme/my x/.git" "$home/Projects/github/acme/real" "$proj/.claude"
+ln -s "$home/Projects/github/acme/real" "$home/Projects/github/acme/link"
+printf '{"permissions":{"deny":["Edit(/%s/*/*/*/**)"]}}\n' "$home/Projects" > "$proj/.claude/settings.json"
+run_case spaced --add-dir "$home/Projects"
+assert_mount spaced "$home/Projects/github/acme/my x:$home/Projects/github/acme/my x:ro" "a clone path with a space is read-only"
+assert_mount spaced "$home/Projects/github/acme/real:$home/Projects/github/acme/real:ro" "a real dir at the matched depth is read-only"
+assert_no_mount spaced "$home/Projects/github/acme/link:$home/Projects/github/acme/link:ro" "a symlink at the matched depth is not mounted"
+
 # 4. Without a host ~/.tool-versions, one is generated: the newest version of
 # each installed plugin, sorted numerically per dot part, mounted read-only
 new_home generated

@@ -668,17 +668,40 @@ for src in "${settings_sources[@]}"; do
   done < <(jq -r '.permissions.additionalDirectories[]? // empty' <<< "${src#*$'\t'}")
   while IFS= read -r rule; do
     [[ -n "$rule" ]] || continue
-    rule="${rule%/\*\*}"
-    rule="${rule%/\*}"
+    # dir/** or dir/* is dir (one suffix only: a/*/** is every a/<x>)
+    case "$rule" in
+      */\*\*) rule="${rule%/\*\*}" ;;
+      */\*) rule="${rule%/\*}" ;;
+    esac
     if [[ "$rule" == *"**"* ]]; then
       log "mounts: '$rule' has a ** inside the path, left to the permission rule"
       continue
     fi
     rule="$(abs_path "$rule" "$base")"
     if [[ "$rule" == *[*?[]* ]]; then
-      # shellcheck disable=SC2206 # the glob is meant to expand
-      local_matches=($rule)
-      for m in "${local_matches[@]}"; do [[ -e "$m" ]] && ro_paths+=("$m"); done
+      # The part before the first wildcard is a directory this rule covers
+      # some of the clones of (a/*/*/* is the clones in a/): it goes
+      # read-only too, so a session can't create files at the levels in
+      # between or write into a clone made after launch. Clones that
+      # already exist are mounted below it as before (those with their own
+      # read-write .git get it back, more specific).
+      # Only when the first wildcard is a whole path component (* or **):
+      # .env* or src/*.key has a wildcard inside a name, and its prefix is
+      # the project or a directory of ordinary files. Never the project.
+      head="${rule%%[*?[]*}"
+      tail="${rule#"$head"}"
+      comp="${tail%%/*}"
+      prefix="${head%/*}"
+      if [[ "$head" == */ && ( "$comp" == '*' || "$comp" == '**' ) \
+        && -n "$prefix" && -d "$prefix" && "$prefix" != "$(realpath -m "$project_root")" ]]; then
+        ro_paths+=("$prefix")
+      fi
+      # compgen -G takes the pattern as one word: a clone path with spaces
+      # stays whole. A symlink at a matched depth is skipped: mounting it
+      # would mount its target's path.
+      while IFS= read -r m; do
+        [[ -n "$m" && -e "$m" && ! -L "$m" ]] && ro_paths+=("$m")
+      done < <(compgen -G "$rule" || true)
     elif [[ -e "$rule" ]]; then
       ro_paths+=("$rule")
     fi
@@ -751,15 +774,68 @@ done
 # the session can add worktrees to it) keeps its config and hooks read-only:
 # from there a session could run code on the host the next time git runs in
 # that clone. (hooks/ is created first, or the session could create it.)
+# The same goes for every clone that already exists under a read-write
+# directory (a ticket session gets the repo directory as one writable mount):
+# <dir>/<provider>/<owner>/<repo>/.git, found up to four levels down, not
+# following symlinks and not looking inside read-only mounts, and not below
+# $HOME itself when that is the scan root. A worktree's .git is a file that
+# points into its main clone: every one found is read-only, and so are the
+# commondir and gitdir files of the worktrees a clone already has
+# (.git/worktrees/ itself stays writable, so `git worktree add` still
+# works). A main clone with a .git/commondir is redirected already: it gets
+# a warning and its whole .git read-only. Without these, a session could
+# repoint git at a config of its own.
+# Residual risk: a clone made during the session is not covered until the
+# next launch makes its files read-only. ct's host git disables hooks,
+# fsmonitor and external diff and checks the pointer files, but other config
+# keys (filters, sshCommand, credential helpers) and the user's own git in
+# such a clone are not covered.
 # Side effect: a plain `git branch -d` in such a clone warns "could not write
 # config file ... Device or resource busy" (the branch.<name> config section
 # can't be removed) but still deletes the ref; ticket tooling uses
 # `git update-ref -d` after a merge check.
+git_dirs=()
 for p in "${!mount_mode[@]}"; do
-  [[ "${mount_mode[$p]}" == rw && "$(basename "$p")" == .git ]] || continue
-  mkdir -p "$p/hooks"
+  [[ "${mount_mode[$p]}" == rw && "$(basename "$p")" == .git ]] && git_dirs+=("$p")
+done
+ro_mounts=()
+for p in "${!mount_mode[@]}"; do
+  [[ "${mount_mode[$p]}" == ro ]] && ro_mounts+=("$p")
+done
+scan_dirs=()
+[[ "$project_mode" == rw && "$project_abs" != "$HOME" ]] && scan_dirs+=("$project_abs")
+for p in "${!mount_mode[@]}"; do
+  [[ "${mount_mode[$p]}" == rw && "$(basename "$p")" != .git && "$p" != "$HOME" ]] && scan_dirs+=("$p")
+done
+git_files=()
+for d in "${scan_dirs[@]}"; do
+  while IFS= read -r -d '' g; do
+    within "$g" "${ro_mounts[@]}" && continue
+    if [[ -d "$g" && ! -L "$g" ]]; then
+      git_dirs+=("$g")
+    elif [[ -f "$g" && ! -L "$g" ]]; then
+      git_files+=("$g")
+    fi
+  done < <(find "$d" -mindepth 1 -maxdepth 4 -name .git \( -type d -prune -o -type f \) -print0 2>/dev/null)
+done
+for g in "${git_files[@]}"; do
+  mount_mode[$g]=ro
+done
+for p in "${git_dirs[@]}"; do
+  if [[ -e "$p/commondir" ]]; then
+    warn "$p has a commondir file, which redirects git to another directory: mounting the whole .git read-only"
+    mount_mode[$p]=ro
+    continue
+  fi
+  if ! mkdir -p "$p/hooks"; then
+    warn "cannot create $p/hooks, leaving that git directory alone"
+    continue
+  fi
   mount_mode[$p/hooks]=ro
   [[ -f "$p/config" ]] && mount_mode[$p/config]=ro
+  for f in "$p"/worktrees/*/commondir "$p"/worktrees/*/gitdir; do
+    [[ -f "$f" && ! -L "$f" ]] && mount_mode[$f]=ro
+  done
 done
 
 # Files claude is told to read (settings, MCP configs, plugins, prompt

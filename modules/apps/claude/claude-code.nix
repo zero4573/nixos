@@ -5,9 +5,9 @@ _: {
     # (PreToolUse AskUserQuestion), a permission or elicitation prompt, or
     # idle and waiting for your reply (Notification). Once per session until
     # you answer or send a prompt (`clear`, from UserPromptSubmit and
-    # PostToolUse AskUserQuestion), critical and without expiry so it stays
+    # PostToolUse, any tool), critical and without expiry so it stays
     # on screen until dismissed. Sessions in a ct workspace (a workspace.json
-    # with an id at or above the cwd) are left to ct's own hook, which also
+    # with an id and ct's CLAUDE.md next to it, at or above the cwd, below $HOME) are left to ct's own hook, which also
     # knows not to ping while the ticket's agents are still running. Baked
     # as an absolute /nix/store path, so this also works unmodified inside
     # claude-sandbox, which bind-mounts /nix/store read-only and shares this
@@ -26,8 +26,8 @@ _: {
       fi
       cwd="$(field .cwd)"
       d="$cwd"
-      while [[ -n "$d" && "$d" != / ]]; do
-        "$jq" -e '.id // empty' "$d/workspace.json" >/dev/null 2>&1 && exit 0
+      while [[ -n "$d" && "$d" != / && "$d" != "$HOME" ]]; do
+        [[ -f "$d/CLAUDE.md" ]] && "$jq" -e '.id // empty' "$d/workspace.json" >/dev/null 2>&1 && exit 0
         d="$(dirname "$d")"
       done
       [[ -e "$flag" ]] && exit 0
@@ -135,7 +135,8 @@ _: {
             { matcher = "AskUserQuestion"; hooks = [ (cmd "${notifyScript}") ]; }
           ];
           PostToolUse = [
-            { matcher = "AskUserQuestion"; hooks = [ (cmd "${notifyScript} clear") ]; }
+            # any tool that ran after an approved permission prompt
+            { matcher = ""; hooks = [ (cmd "${notifyScript} clear") ]; }
           ];
           UserPromptSubmit = [
             { matcher = ""; hooks = [ (cmd "${notifyScript} clear") ]; }
