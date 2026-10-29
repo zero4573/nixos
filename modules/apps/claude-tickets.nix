@@ -21,9 +21,9 @@ _: {
   #    session's sandbox: sessions run in the foreground of that shell, so
   #    they inherit its environment (`CLAUDE_SANDBOX_PORTS=3000 ct start
   #    PROJ-12`)
-  #  * your session rules (sessionSettings below): what ticket and kb
+  #  * your session rules (sessionSettings below): what ticket and spec
   #    sessions may never do, on top of claude-tickets' own (the graph
-  #    cache read-only; kb sessions also keep out of the repos)
+  #    cache read-only; spec sessions also keep out of the repos)
   flake.homeModules.claudeTicketsSetup = { config, ... }:
   let
     # Atlassian Rovo MCP tools that consume Rovo credits (unified search,
@@ -47,7 +47,7 @@ _: {
       container = "podman";
       systemdSlice = "aisandbox.slice";
 
-      # Ticket and kb sessions commit on their branches, signed through
+      # Ticket and spec sessions commit on their branches, signed through
       # git-ssh-broker's agent, and push them (`/tickets:save` pushes the
       # feature branches) through the broker, which refuses force pushes and
       # branch/tag deletes: those, like the managed-settings denies of them

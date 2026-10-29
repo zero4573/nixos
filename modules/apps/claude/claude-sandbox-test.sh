@@ -141,7 +141,7 @@ assert_mount gitdir "$home/clone/.git:$home/clone/.git:rw" ".git is read-write"
 assert_mount gitdir "$home/clone/.git/config:$home/clone/.git/config:ro" ".git/config is read-only"
 assert_mount gitdir "$home/clone/.git/hooks:$home/clone/.git/hooks:ro" ".git/hooks is read-only"
 
-# 3b. A kb/teach-shaped session: a glob deny rule (dir/*/*/*/**) over the
+# 3b. A spec/teach-shaped session: a glob deny rule (dir/*/*/*/**) over the
 # projects root. The root is read-only (a session can't create files at the
 # levels between, or write into a clone made later), each repo already there
 # read-only too, a .git given read-write on its own for worktrees with config

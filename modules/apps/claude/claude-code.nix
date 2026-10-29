@@ -81,7 +81,7 @@ _: {
       # default
       cleanupPeriodDays = 90;
       systemPrompt = "if AGENTS.md exists, read it as CLAUDE.md.  Ensure that both AGENTS.md, and README.md (if it exists), are always kept up to date when a prompt changes a project";
-      # Ticket and kb sessions (the lead and its tickets:task,
+      # Ticket and spec sessions (the lead and its tickets:task,
       # tickets:mechanical, tickets:reviewer and tickets:reviewer-deep
       # subagents) add stricter rules (no reset --hard, branch -D, clean or
       # `ct ws rm`, ...) in their own .claude/settings.json
