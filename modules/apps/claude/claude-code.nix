@@ -1,69 +1,105 @@
 _: {
   flake.homeModules.claudeCode = { pkgs, lib, ... }:
   let
-    # Desktop-notifies via notify-send when a session needs you: a question
-    # (PreToolUse AskUserQuestion), a permission or elicitation prompt, or
-    # idle and waiting for your reply (Notification). Once per session until
-    # you answer or send a prompt (`clear`, from UserPromptSubmit and
-    # PostToolUse, any tool), critical and without expiry so it stays
-    # on screen until dismissed. Sessions in a ct workspace (a workspace.json
-    # with an id and ct's CLAUDE.md next to it, at or above the cwd, below $HOME) are left to ct's own hook, which also
-    # knows not to ping while the ticket's agents are still running. Baked
-    # as an absolute /nix/store path, so this also works unmodified inside
-    # claude-sandbox, which bind-mounts /nix/store read-only and shares this
-    # same settings.json with the host.
-    notifyScript = pkgs.writeShellScript "claude-code-notify" ''
-      set -uo pipefail
-      jq=${lib.getExe pkgs.jq}
-      input="$(cat)"
-      field() { "$jq" -r "$1 // empty" <<<"$input" 2>/dev/null || true; }
-      session="$(field .session_id)"
-      flag_dir="''${XDG_RUNTIME_DIR:-/tmp}/claude-code-notify"
-      flag="$flag_dir/''${session:-unknown}"
-      if [[ "''${1:-}" == clear ]]; then
-        rm -f "$flag"
-        exit 0
-      fi
-      cwd="$(field .cwd)"
-      d="$cwd"
-      while [[ -n "$d" && "$d" != / && "$d" != "$HOME" ]]; do
-        [[ -f "$d/CLAUDE.md" ]] && "$jq" -e '.id // empty' "$d/workspace.json" >/dev/null 2>&1 && exit 0
-        d="$(dirname "$d")"
-      done
-      [[ -e "$flag" ]] && exit 0
-      mkdir -p "$flag_dir" && : >"$flag"
-      message="$(field '.tool_input.questions[0].question')"
-      [[ -n "$message" ]] || message="$(field .message)"
-      [[ -n "$message" ]] || message="needs you"
-      title="Claude Code"
-      [[ -n "$cwd" ]] && title="Claude Code ($(basename "$cwd"))"
-      ${lib.getExe' pkgs.libnotify "notify-send"} -a "Claude Code" -u critical -t 0 "$title" "$message" || true
+    # herdr's Claude integration (what `herdr integration install claude`
+    # would add, but settings.json is Nix-owned, see claudeCodeSettings): on
+    # SessionStart it reports the session id to the herdr pane it runs in,
+    # which herdr needs to resume the session. Herdr's own script from the
+    # same release as the package, with python3 on PATH since it needs one.
+    # Outside herdr (no HERDR_* env, as in claude-sandbox) it does nothing.
+    # Notifications are herdr's too: see modules/apps/herdr/herdr.nix.
+    herdrHook = pkgs.writeShellScript "herdr-claude-hook" ''
+      PATH=${pkgs.python3}/bin:$PATH exec ${pkgs.runtimeShell} \
+        ${pkgs.herdr.src}/src/integration/assets/claude/herdr-agent-state.sh "$@"
     '';
 
-    # SessionStart: when the session has a `graphify` MCP server (code graph
-    # of the project), tells Claude to reach for it first. "Hooked up" means
-    # GRAPHIFY_MCP=1 (claude-sandbox sets it when its sidecar or a caller's
-    # --mcp-config provides the server) or a project .mcp.json defining one.
-    # Its stdout becomes session context; runs again after /clear and compaction.
-    graphifyContextScript = pkgs.writeShellScript "claude-code-graphify-context" ''
+    # Status line: the main context window's token count and how much of the
+    # plan's 5-hour and weekly limits is used (as in /usage), e.g. `ctx 162k ·
+    # 5h ▰▰▱▱▱ 42% · 7d ▰▰▰▰▱ 82% · ↻5h 1h23m` (the limits only for
+    # subscribers; ↻ counts down to the sooner of their resets, marked with
+    # its window, so statusLine.refreshInterval re-runs it every minute).
+    # Printed as Claude's status line and, inside a herdr pane, reported as
+    # that pane's sidebar tokens (modules/apps/herdr/herdr.nix lays them out).
+    # The count and each limit go under one of three tokens by level (the
+    # count: ctx_ok, ctx_warn from 150k, ctx_hot from 250k; a limit, e.g.
+    # five_hour, five_hour_warn from 80% used, five_hour_hot from 95%) since
+    # herdr's colour rules only compare bare numbers, and are coloured the
+    # same in Claude's status line; empty values clear the others. Reported
+    # only when the line changes; `clear` (SessionEnd) removes them all.
+    statusLineScript = pkgs.writeShellScript "claude-code-status-line" ''
       set -uo pipefail
-      cwd="$(${lib.getExe pkgs.jq} -r '.cwd // empty' 2>/dev/null || true)"
-      cwd="''${cwd:-$PWD}"
-      if [[ "''${GRAPHIFY_MCP:-}" != 1 ]] \
-          && ! ${lib.getExe pkgs.jq} -e '.mcpServers.graphify' "$cwd/.mcp.json" >/dev/null 2>&1; then
+      if [[ "''${1:-}" == clear ]]; then
+        line=""
+        fields=("" "" "" "" "" "" "" "" "" "")
+      else
+        IFS=$'\t' read -r -a fields < <(${lib.getExe pkgs.jq} -r '
+          # Claude only refreshes the limits on an API reply, so an idle
+          # session still holds a window that has since reset: count it as 0% used
+          def used: if (.resets_at // 0) > 0 and .resets_at <= now then 0
+            else .used_percentage | if . > 100 then 100 else . end end;
+          def countdown: (. - now) as $s | if $s <= 0 then ""
+            elif $s >= 86400 then "\($s / 86400 | floor)d\($s % 86400 / 3600 | floor)h"
+            elif $s >= 3600 then "\($s / 3600 | floor)h\($s % 3600 / 60 | floor)m"
+            else "\($s / 60 | ceil)m" end;
+          # filled for what is used, like /usage
+          def bar: used as $u | ($u / 20 | round) as $n
+            | ([range($n)] | map("▰") | join("")) + ([range(5 - $n)] | map("▱") | join(""))
+              + " \($u | round)%";
+          # one value as three fields (ok, warn, hot), only one of them set
+          def band($v; $warn; $hot):
+            if . == "" then ["", "", ""]
+            elif $v >= $hot then ["", "", .]
+            elif $v >= $warn then ["", ., ""]
+            else [., "", ""] end;
+          def limit($name): if . then (used as $u | "\($name) \(bar)" | band($u; 80; 95))
+            else ["", "", ""] end;
+          (.context_window.total_input_tokens // 0) as $t
+          | (if $t == 0 then ""
+             elif $t >= 1000 then "ctx \($t / 1000 | floor)k"
+             else "ctx \($t)" end | band($t; 150000; 250000))
+            + (.rate_limits.five_hour // null | limit("5h"))
+            + (.rate_limits.seven_day // null | limit("7d"))
+            # the sooner reset, marked with its window
+            + [[(.rate_limits.five_hour | {w: "5h", at: .resets_at?}),
+                (.rate_limits.seven_day | {w: "7d", at: .resets_at?})
+                | select((.at // 0) > now)] | min_by(.at)
+                | if . then (.w as $w | .at | countdown
+                    | if . == "" then "" else "↻\($w) \(.)" end) else "" end]
+          | map(if . == "" then "-" else . end) | @tsv' 2>/dev/null)
+        # placeholders keep empty fields from collapsing under read
+        for i in "''${!fields[@]}"; do [[ "''${fields[i]}" == - ]] && fields[i]=""; done
+        line="$(printf '%s\n' "''${fields[@]}" | sed '/^$/d' | paste -sd'|' | sed 's/|/ · /g')"
+        # Claude's status line takes ANSI colours (herdr's tokens stay plain):
+        # warn fields in herdr's yellow, hot ones in bold red
+        shown=("''${fields[@]}")
+        for i in 1 4 7; do
+          [[ -n "''${shown[i]:-}" ]] && shown[i]=$'\e[38;2;229;192;123m'"''${shown[i]}"$'\e[0m'
+        done
+        for i in 2 5 8; do
+          [[ -n "''${shown[i]:-}" ]] && shown[i]=$'\e[1;38;2;224;108;117m'"''${shown[i]}"$'\e[0m'
+        done
+        printf '%s\n' "''${shown[@]}" | sed '/^$/d' | paste -sd'|' | sed 's/|/ · /g'
+      fi
+      # In claude-sandbox herdr is out of reach: the fields go, one per
+      # line, to a file in a directory from the host, and the launcher in
+      # the herdr pane reports them (claude-sandbox.sh)
+      if [[ -n "''${CLAUDE_SANDBOX_HERDR_DIR:-}" ]]; then
+        out="$CLAUDE_SANDBOX_HERDR_DIR/usage"
+        for i in {0..9}; do printf '%s\n' "''${fields[i]:-}"; done >"$out.tmp" \
+          && mv -f "$out.tmp" "$out"
         exit 0
       fi
-      cat <<'EOF'
-      This project has a code knowledge graph served by the `graphify` MCP server
-      (mcp__graphify__* tools; kept current as files change). Use it first for questions
-      about the codebase's structure, architecture, where something is defined or used,
-      what depends on what, and how components connect, before broad Grep/Glob/Read
-      sweeps: query_graph for a question, get_node / get_neighbors for a symbol or file,
-      shortest_path for how A reaches B, god_nodes / graph_stats / get_community for an
-      overview. Then read the files it points to for detail; fall back to search when the
-      graph has no answer. Prefer these tools over the /graphify skill's CLI query flows
-      for an existing graph, and don't rebuild graphify-out/ yourself.
-      EOF
+      [[ "''${HERDR_ENV:-}" == 1 && -n "''${HERDR_PANE_ID:-}" ]] || exit 0
+      state_dir="''${XDG_RUNTIME_DIR:-/tmp}/claude-herdr-usage"
+      state="$state_dir/$HERDR_PANE_ID"
+      [[ "$(cat "$state" 2>/dev/null)" == "$line" && "''${1:-}" != clear ]] && exit 0
+      mkdir -p "$state_dir" && printf '%s' "$line" >"$state"
+      tokens=()
+      names=(ctx_ok ctx_warn ctx_hot five_hour five_hour_warn five_hour_hot
+        seven_day seven_day_warn seven_day_hot reset)
+      for i in "''${!names[@]}"; do tokens+=(--token "''${names[i]}=''${fields[i]:-}"); done
+      ${lib.getExe pkgs.herdr} pane report-metadata "$HERDR_PANE_ID" \
+        --source claude-usage --seq "$(date +%s%N)" "''${tokens[@]}" >/dev/null 2>&1 || true
     '';
 
     settings = {
@@ -72,9 +108,16 @@ _: {
       verbose = true;
       useAutoModeDuringPlan = true;
       notifications = true;
-      # Claude Code's own terminal notifications (bell / OSC) off: the
-      # hooks below are the one notifier
+      # Claude Code's own terminal notifications (bell / OSC) off: herdr
+      # notifies (modules/apps/herdr/herdr.nix)
       preferredNotifChannel = "notifications_disabled";
+      # claude-tickets' hooks desktop-notify (sticky, until dismissed) when a
+      # ticket session needs you; herdr already does, so theirs are off
+      env.CLAUDE_TICKETS_NOTIFY = "0";
+      # The LSP tool, served by claude-sandbox.nix's lspServers plugin (the
+      # `lsp` skill says when to use it)
+      env.ENABLE_LSP_TOOL = "1";
+      statusLine = { type = "command"; command = "${statusLineScript}"; refreshInterval = 60; };
       autoUpdate = false;
       # Transcripts are what `claude --continue` resumes (e.g. a ticket
       # session restarted by `ct start`); keep them longer than the 30-day
@@ -114,8 +157,6 @@ _: {
           "Bash(ls:*)"
           "Bash(cat:*)"
           "Bash(echo:*)"
-          # graphify's code graph (see graphifyContextScript): read-only tools
-          "mcp__graphify"
         ];
       };
       hooks =
@@ -123,23 +164,14 @@ _: {
           cmd = command: { type = "command"; inherit command; };
         in {
           SessionStart = [
-            { matcher = ""; hooks = [ (cmd "${graphifyContextScript}") ]; }
+            # matcher and timeout as herdr's installer writes them
+            {
+              matcher = "^(startup|resume|clear|compact|fork)$";
+              hooks = [ (cmd "${herdrHook} session" // { timeout = 10; }) ];
+            }
           ];
-          # Only when you're needed: no ping when a turn ends (a ticket
-          # session's turns end on every agent notice), nor for other
-          # notification types
-          Notification = [
-            { matcher = "permission_prompt|elicitation_dialog|idle_prompt"; hooks = [ (cmd "${notifyScript}") ]; }
-          ];
-          PreToolUse = [
-            { matcher = "AskUserQuestion"; hooks = [ (cmd "${notifyScript}") ]; }
-          ];
-          PostToolUse = [
-            # any tool that ran after an approved permission prompt
-            { matcher = ""; hooks = [ (cmd "${notifyScript} clear") ]; }
-          ];
-          UserPromptSubmit = [
-            { matcher = ""; hooks = [ (cmd "${notifyScript} clear") ]; }
+          SessionEnd = [
+            { matcher = ""; hooks = [ (cmd "${statusLineScript} clear") ]; }
           ];
         };
     };
@@ -172,54 +204,6 @@ _: {
     # pull in newer content from a source.
     skillSources = [ ];
 
-    # graphify's Claude Code skill (SKILL.md + its references/ sidecar), from
-    # the latest GitHub release. "Latest" can't be resolved in pure eval, so
-    # this runs at activation: it resolves the release tag on every switch,
-    # downloads only when the tag changed, and caches the result so an
-    # offline switch reinstalls the last fetched version instead of dropping
-    # the skill.
-    graphifySkillScript = pkgs.writeShellScript "claude-code-graphify-skill" ''
-      set -euo pipefail
-      export PATH=${lib.makeBinPath [ pkgs.curl pkgs.gnutar pkgs.gzip pkgs.coreutils ]}
-      repo="Graphify-Labs/graphify"
-      cache="''${XDG_CACHE_HOME:-$HOME/.cache}/claude-code/graphify-skill"
-      dest="$HOME/.claude/skills/graphify"
-
-      latest_url="$(curl -fsSL --max-time 20 -o /dev/null -w '%{url_effective}' \
-        "https://github.com/$repo/releases/latest" || true)"
-      tag="''${latest_url##*/tag/}"
-      if [[ "$latest_url" == */tag/* && "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
-        if [[ "$(cat "$cache/.tag" 2>/dev/null || true)" != "$tag" ]]; then
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          if curl -fsSL --max-time 120 "https://codeload.github.com/$repo/tar.gz/refs/tags/$tag" \
-              | tar -xz -C "$tmp" --strip-components=1 --wildcards \
-                  '*/graphify/skill.md' '*/graphify/skills/claude/references/*' \
-              && [[ -s "$tmp/graphify/skill.md" ]]; then
-            mkdir -p "$tmp/out"
-            cp "$tmp/graphify/skill.md" "$tmp/out/SKILL.md"
-            cp -r "$tmp/graphify/skills/claude/references" "$tmp/out/references"
-            echo "$tag" > "$tmp/out/.tag"
-            mkdir -p "$(dirname "$cache")"
-            rm -rf "$cache"
-            mv "$tmp/out" "$cache"
-            echo "graphify skill: installed $tag"
-          else
-            echo "graphify skill: failed to download $tag, keeping cached copy" >&2
-          fi
-        fi
-      else
-        echo "graphify skill: couldn't resolve the latest release, keeping cached copy" >&2
-      fi
-
-      if [[ -f "$cache/SKILL.md" ]]; then
-        rm -rf "$dest"
-        mkdir -p "$dest"
-        cp -r "$cache/SKILL.md" "$cache/references" "$dest/"
-        chmod -R u+rwX "$dest"
-      fi
-    '';
-
     # For each configured source: fetch it, then either copy everything
     # under `path` (only == null) or just the named subdirectories.
     skillCopyCommands = lib.concatMapStrings (
@@ -238,6 +222,7 @@ _: {
         '') s.only
     ) skillSources;
   in {
+    # notify-send on PATH for ct's notification hook (and herdr's)
     home.packages = [ pkgs.libnotify ];
 
     home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -263,11 +248,6 @@ _: {
       run cp -r ${agentsSource}/. "$HOME/.claude/agents/"
       run rm -f "$HOME/.claude/agents/README.md"
       run chmod -R u+rwX "$HOME/.claude/agents"
-    '';
-
-    # Must run after claudeCodeSkills, which wipes ~/.claude/skills
-    home.activation.claudeCodeGraphifySkill = lib.hm.dag.entryAfter [ "claudeCodeSkills" ] ''
-      run ${graphifySkillScript}
     '';
   };
 }

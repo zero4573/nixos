@@ -14,8 +14,6 @@ _: {
     # isn't mounted there.
     programs.git.ignores = [
       "**/.claude/settings.local.json"
-      # graphify's code graph, built by claude-sandbox's sidecar
-      "graphify-out/"
     ];
 
     programs.git.settings.pull.rebase = true;

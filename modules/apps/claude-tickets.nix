@@ -6,10 +6,9 @@ _: {
   #    (modules/apps/claude/claude-sandbox.nix)
   #  * the MCP servers `ct sync` talks to are sandbox-proxy's, on the host
   #    loopback (modules/apps/sandbox-proxy), started on demand
-  #  * the code graph's containers run in aisandbox.slice, with podman
-  #  * the `fff` MCP server the skills search with comes with every
-  #    sandboxed session (programs.claudeSandbox.extraMcpServers), not
-  #    from here
+  #  * Claude's LSP tool, which the skills can use for references and
+  #    callers, comes with every sandboxed session
+  #    (programs.claudeSandbox.lspServers), not from here
   #  * the tools sessions run (`ct ws`, `ct new`, ...) are on the
   #    sandbox's PATH, and CLAUDE_TICKETS_* variables reach them
   #  * ct's embedding model cache ($XDG_CACHE_HOME/claude-tickets/models) is mounted
@@ -22,8 +21,8 @@ _: {
   #    they inherit its environment (`CLAUDE_SANDBOX_PORTS=3000 ct start
   #    PROJ-12`)
   #  * your session rules (sessionSettings below): what ticket and spec
-  #    sessions may never do, on top of claude-tickets' own (the graph
-  #    cache read-only; spec sessions also keep out of the repos)
+  #    sessions may never do, on top of claude-tickets' own (spec
+  #    sessions also keep out of the repos)
   flake.homeModules.claudeTicketsSetup = { config, ... }:
   let
     # Atlassian Rovo MCP tools that consume Rovo credits (unified search,
@@ -44,8 +43,6 @@ _: {
       enable = true;
       mcpConfig = "${config.xdg.configHome}/sandbox-proxy/mcp-host.json";
       mcpPrepare = "sandbox-proxy start mcp";
-      container = "podman";
-      systemdSlice = "aisandbox.slice";
 
       # Ticket and spec sessions commit on their branches, signed through
       # git-ssh-broker's agent, and push them (`/tickets:save` pushes the

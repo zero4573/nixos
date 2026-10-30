@@ -1,4 +1,4 @@
-{ inputs, ... }: {
+_: {
   # Claude Code, sandboxed by default:
   #
   #  * claude - Claude Code in a sandbox (claude-sandbox.sh): a privileged
@@ -8,7 +8,7 @@
   #       Claude's settings (--add-dir and permissions.additionalDirectories
   #       mount read-write, Edit/Write deny rules inside them read-only).
   #       Sandbox-only settings are environment variables (CLAUDE_SANDBOX_*:
-  #       ports, pod name, quiet launch, no graphify, host variables to pass
+  #       ports, pod name, quiet launch, host variables to pass
   #       in, read-only host paths: programs.claudeSandbox.readOnlyPaths);
   #       `claude-sandbox --help` lists them. Tools run through claude
   #       don't need to know they're sandboxed.
@@ -28,24 +28,13 @@
   #  servers were added with `sandbox-proxy mcp add` (e.g. Jira/Bitbucket via
   #  Atlassian Rovo), registered with claude without their tokens. The pod and
   #  its containers are named after the git repo + checkout folder
-  #  (claude-sandbox-<repo>-<folder>[-N], with -claude/-graphify container
-  #  suffixes) and labelled claude-sandbox.{repo,project,role}, e.g.
-  #  `podman ps --filter label=claude-sandbox.repo=<repo>`. Next to Claude runs
-  #  a graphify sidecar (claude-sandbox-graphify-sidecar.sh) that builds a code
-  #  knowledge graph of the project (local tree-sitter AST, no LLM), keeps it
-  #  updated, and serves it as the `graphify` MCP server on the pod's
-  #  localhost; the graph lives in ./graphify-out (globally git-ignored, see
-  #  modules/apps/git.nix). Each --add-dir codebase (one with parseable code,
-  #  not overlapping the project) is graphed into its own graphify-out too,
-  #  and the sidecar then serves all of them merged into one graph (node ids
-  #  prefixed per directory, re-merged as they change; they build in the
-  #  background, so a large one never delays startup). A session that
-  #  brings its own graphify server (--mcp-config) skips it. Either way, a
-  #  session with a graphify server gets GRAPHIFY_MCP=1, which
-  #  claude-code.nix's SessionStart hook turns into an instruction to use the
-  #  graph tools first. Every session also gets the stdio MCP servers in
-  #  programs.claudeSandbox.extraMcpServers: by default `fff` (fff-mcp, fast
-  #  file and content search, from the fff flake input). The sandbox's PATH
+  #  (claude-sandbox-<repo>-<folder>[-N], with a -claude container suffix)
+  #  and labelled claude-sandbox.{repo,project,role}, e.g.
+  #  `podman ps --filter label=claude-sandbox.repo=<repo>`. Every session
+  #  gets the stdio MCP servers in programs.claudeSandbox.extraMcpServers
+  #  (none by default), and every session, claude-open's too, gets the
+  #  language servers in programs.claudeSandbox.lspServers as a plugin for
+  #  Claude's LSP tool. The sandbox's PATH
   #  gets programs.claudeSandbox.extraPackages. The containers run under the
   #  `aisandbox.slice` systemd user slice (see modules/apps/ai-sandbox-slice.nix)
   #  so they fair-share CPU/IO/memory with the rest of the desktop session.
@@ -53,12 +42,10 @@
   #  ~/.local/state/claude-sandbox.log, to see where a slow or stuck launch is.
   #
   #  Everything a session runs is pinned: claude-code comes from the flake's
-  #  nixpkgs, the container images by digest, and graphify by a hashed pip
-  #  lock (claude-sandbox-graphify-lock writes it). See UPDATES.md.
+  #  nixpkgs and the container image by digest. See UPDATES.md.
   #
   # Script bodies live in sibling files (claude-sandbox.sh,
-  # claude-sandbox-nested-podman-setup.sh, claude-sandbox-graphify-sidecar.sh,
-  # claude-sandbox-graphify-install.sh, claude-sandbox-graphify-lock.sh)
+  # claude-sandbox-nested-podman-setup.sh)
   flake.homeModules.claudeSandbox = { pkgs, lib, config, ... }:
   let
     cfg = config.programs.claudeSandbox;
@@ -80,34 +67,29 @@
       ];
     };
 
-    inherit (cfg) graphifyVersion graphifyInstallScript graphifyLock graphifyImage;
-    graphifyExtras = lib.concatStringsSep "," cfg.graphifyExtras;
-    graphifySpec = "graphifyy[${graphifyExtras}]==${graphifyVersion}";
-    # Python minor version of graphifyImage, which the lock is resolved for
-    graphifyPython = "3.12";
-
-    # Bumps the graphify lock (see claude-sandbox-graphify-lock.sh, UPDATES.md)
-    graphifyLockTool = pkgs.writeShellApplication {
-      name = "claude-sandbox-graphify-lock";
-      runtimeInputs = [ pkgs.uv pkgs.coreutils pkgs.gnused ];
-      text = ''
-        export GRAPHIFY_VERSION=${graphifyVersion}
-        export GRAPHIFY_EXTRAS=${graphifyExtras}
-        export GRAPHIFY_PYTHON=${graphifyPython}
-        ${builtins.readFile ./claude-sandbox-graphify-lock.sh}
-      '';
-    };
-
     gitUpdate = pkgs.writeShellScript "claude-git-update" ''
       export PATH=${lib.makeBinPath [ pkgs.git pkgs.coreutils ]}:$PATH
       ${builtins.readFile ./claude-git-update.sh}
+    '';
+
+    # programs.claudeSandbox.lspServers as a Claude Code plugin (its
+    # .lsp.json) that both launchers pass with --plugin-dir; the LSP tool it
+    # backs is enabled by ENABLE_LSP_TOOL in claude-code.nix's settings
+    lspPlugin = pkgs.runCommand "claude-lsp-plugin" { } ''
+      mkdir -p $out/.claude-plugin
+      cp ${pkgs.writeText "plugin.json" (builtins.toJSON {
+        name = "lsp";
+        version = "1.0.0";
+        description = "Language servers for Claude's LSP tool";
+      })} $out/.claude-plugin/plugin.json
+      cp ${pkgs.writeText "lsp.json" (builtins.toJSON cfg.lspServers)} $out/.lsp.json
     '';
 
     claudeOpen = pkgs.writeShellApplication {
       name = "claude-open";
       text = ''
         ${gitUpdate} "$PWD"
-        exec ${lib.getExe' cfg.package "claude"} "$@"
+        exec ${lib.getExe' cfg.package "claude"} --plugin-dir ${lspPlugin} "$@"
       '';
     };
 
@@ -194,7 +176,7 @@
 
     # programs.claudeSandbox.extraMcpServers as an MCP config file in the
     # store (reached through the read-only /nix/store mount); the launcher
-    # merges it with sandbox-proxy's and graphify's servers
+    # merges it with sandbox-proxy's servers
     extraMcpConfig = lib.optionalString (cfg.extraMcpServers != { })
       (toString (pkgs.writeText "claude-sandbox-extra-mcp.json"
         (builtins.toJSON { mcpServers = cfg.extraMcpServers; })));
@@ -234,11 +216,8 @@
         export MANAGED_SETTINGS=${managedSettings}
         export NIX_DAEMON_SOCKET_DIR=/nix/var/nix/daemon-socket
         export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
-        export GRAPHIFY_SIDECAR=${./claude-sandbox-graphify-sidecar.sh}
-        export GRAPHIFY_IMAGE=${lib.escapeShellArg graphifyImage}
-        export GRAPHIFY_LOCK=${graphifyLock}
-        export GRAPHIFY_INSTALL=${graphifyInstallScript}
         export EXTRA_MCP_CONFIG=${lib.escapeShellArg extraMcpConfig}
+        export CLAUDE_LSP_PLUGIN=${lspPlugin}
         export CLAUDE_GIT_UPDATE=${gitUpdate}
         export GIT_SSH_BROKER=${lib.getExe' config.programs.gitSshBroker.package "git-ssh-broker"}
         export GIT_SSH_BROKER_SSH=${lib.getExe' pkgs.openssh "ssh"}
@@ -247,7 +226,11 @@
         export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
         export GIT_GLOBAL_CONFIG=${config.xdg.configFile."git/config".source}
         export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-        exec bash ${./claude-sandbox.sh} "$@"
+        export HERDR_BIN=${lib.getExe pkgs.herdr}
+        # argv[0] "claude" (for both names) so herdr, which identifies agents
+        # by the pane's foreground processes, recognises the session: the
+        # real claude runs inside the container, out of its sight
+        exec -a claude bash ${./claude-sandbox.sh} "$@"
       '';
     };
   in {
@@ -261,68 +244,14 @@
       description = "claude-code package run by claude (sandboxed), claude-sandbox and claude-open.";
     };
 
-    # Container images, pinned to an exact tag and the digest of its
-    # multi-arch index (UPDATES.md says how to bump). image runs Claude;
-    # graphifyImage runs the graphify sidecar, and its Python minor version
-    # must match the lock's (graphifyPython above).
+    # Container image, pinned to an exact tag and the digest of its
+    # multi-arch index (UPDATES.md says how to bump)
     options.programs.claudeSandbox.image = lib.mkOption {
       type = lib.types.str;
       default = "docker.io/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a";
       readOnly = true;
       description = "Pinned image claude-sandbox runs Claude in.";
     };
-    options.programs.claudeSandbox.graphifyImage = lib.mkOption {
-      type = lib.types.str;
-      default = "docker.io/library/python:3.12.15-slim-trixie@sha256:29113dcae7aad06daa8e95260fa09f27d62be33b9687ea3774f771d601a02256";
-      readOnly = true;
-      description = "Pinned Python image for the graphify sidecar.";
-    };
-
-    # Hashed pip lock of graphifyy, its extras and every dependency
-    # (claude-sandbox-graphify-requirements.txt, written by
-    # claude-sandbox-graphify-lock). The sidecar installs
-    # exactly this, with pip --require-hashes; a new lock installs into a new
-    # venv on the next start.
-    options.programs.claudeSandbox.graphifyLock = lib.mkOption {
-      type = lib.types.path;
-      default = ./claude-sandbox-graphify-requirements.txt;
-      readOnly = true;
-      description = "Hashed pip requirements the graphify sidecar installs.";
-    };
-
-    # Pinned graphifyy release (graphifyy isn't in nixpkgs). With
-    # graphifyExtras, it's what the lock was resolved from: the build fails
-    # until the lock matches (regenerate it with claude-sandbox-graphify-lock).
-    options.programs.claudeSandbox.graphifyVersion = lib.mkOption {
-      type = lib.types.str;
-      default = "0.9.73";
-      readOnly = true;
-      description = "graphifyy release used by claude-sandbox's graphify sidecar.";
-    };
-
-    # pip extras installed with graphifyy. Besides the MCP server and watch
-    # mode, these are the tree-sitter grammars graphify doesn't bundle; without
-    # one, files of that language add nothing to the graph (graphify warns
-    # "<lang> not installed"). Left out on purpose: r and erlang (they pull
-    # the large tree-sitter-language-pack), robot, and the non-code extras
-    # (LLM backends, pdf, video, office, neo4j, ...). Changing the list means
-    # regenerating the lock (see graphifyVersion).
-    options.programs.claudeSandbox.graphifyExtras = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ "mcp" "watch" "sql" "terraform" "pascal" "dm" "ocaml" "commonlisp" "vbnet" "solidity" ];
-      readOnly = true;
-      description = "pip extras of graphifyy installed for claude-sandbox's graphify sidecar.";
-    };
-
-    # The shared install step (claude-sandbox-graphify-install.sh), used by the
-    # sidecar
-    options.programs.claudeSandbox.graphifyInstallScript = lib.mkOption {
-      type = lib.types.path;
-      default = ./claude-sandbox-graphify-install.sh;
-      readOnly = true;
-      description = "Script that installs graphify into the shared claude-sandbox-graphify volume.";
-    };
-
     # Host variables passed into the sandbox (name globs), built into the
     # launcher so they apply right after a switch; CLAUDE_SANDBOX_PASS_ENV
     # in the environment wins
@@ -349,8 +278,8 @@
       description = "Packages whose bin/ is put on PATH inside claude-sandbox (reached through the read-only /nix/store mount).";
     };
 
-    # MCP servers every sandboxed session gets, next to sandbox-proxy's and
-    # the graphify sidecar's: Claude Code mcpServers entries by server name.
+    # MCP servers every sandboxed session gets, next to sandbox-proxy's:
+    # Claude Code mcpServers entries by server name.
     # Their commands run inside the sandbox, so they must be /nix/store paths
     # (or tools on its PATH).
     options.programs.claudeSandbox.extraMcpServers = lib.mkOption {
@@ -362,25 +291,72 @@
       description = "Extra stdio MCP servers (Claude Code mcpServers entries, by name) for every claude-sandbox session.";
     };
 
-    # fff-mcp (tools find_files, grep, multi_grep), indexing the session's
-    # working directory. Pinned by the fff flake input (flake.lock), so its
-    # own update check is off.
-    config.programs.claudeSandbox.extraMcpServers.fff = {
-      command = lib.getExe' inputs.fff.packages.${pkgs.stdenv.hostPlatform.system}.fff-mcp "fff-mcp";
-      args = [ "--no-update-check" ];
+    # Language servers behind Claude's LSP tool (definitions, references,
+    # call hierarchy, symbols), as .lsp.json entries by name. Each is
+    # started on demand for the files it claims, inside the sandbox when
+    # the session is sandboxed, so commands are /nix/store paths. gopls
+    # takes `go` from the session's PATH (asdf), typescript-language-server
+    # a project's own typescript when it has one, and ruby-lsp only indexes
+    # the code (it runs on its own Ruby, so any project Ruby version works),
+    # writing its bundle to .ruby-lsp/ (self-ignored) in the working
+    # directory. No SQL server: sqls answers nothing without a configured
+    # database connection, and HAML/ERB have none worth running.
+    options.programs.claudeSandbox.lspServers = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+      default = {
+        go = {
+          command = lib.getExe pkgs.gopls;
+          args = [ "serve" ];
+          extensionToLanguage.".go" = "go";
+        };
+        typescript = {
+          command = lib.getExe pkgs.typescript-language-server;
+          args = [ "--stdio" ];
+          extensionToLanguage = {
+            ".ts" = "typescript";
+            ".mts" = "typescript";
+            ".cts" = "typescript";
+            ".tsx" = "typescriptreact";
+            ".js" = "javascript";
+            ".mjs" = "javascript";
+            ".cjs" = "javascript";
+            ".jsx" = "javascriptreact";
+          };
+        };
+        ruby = {
+          command = lib.getExe pkgs.ruby-lsp;
+          args = [ ];
+          extensionToLanguage = { ".rb" = "ruby"; ".rake" = "ruby"; };
+        };
+        terraform = {
+          command = lib.getExe' pkgs.terraform-ls "terraform-ls";
+          args = [ "serve" ];
+          extensionToLanguage = { ".tf" = "terraform"; ".tfvars" = "terraform-vars"; };
+        };
+        bash = {
+          command = lib.getExe pkgs.bash-language-server;
+          args = [ "start" ];
+          extensionToLanguage = { ".sh" = "shellscript"; ".bash" = "shellscript"; };
+        };
+        yaml = {
+          command = lib.getExe pkgs.yaml-language-server;
+          args = [ "--stdio" ];
+          extensionToLanguage = { ".yml" = "yaml"; ".yaml" = "yaml"; };
+        };
+        nix = {
+          command = lib.getExe pkgs.nixd;
+          args = [ ];
+          extensionToLanguage.".nix" = "nix";
+        };
+        python = {
+          command = lib.getExe' pkgs.basedpyright "basedpyright-langserver";
+          args = [ "--stdio" ];
+          extensionToLanguage = { ".py" = "python"; ".pyi" = "python"; };
+        };
+      };
+      description = "Language servers (Claude Code .lsp.json entries, by name) for the LSP tool in every claude and claude-open session.";
     };
 
-    config.home.packages = [ (sandboxLauncher "claude") (sandboxLauncher "claude-sandbox") claudeOpen graphifyLockTool ];
-
-    config.assertions = [
-      {
-        assertion = lib.hasInfix "# spec: ${graphifySpec}\n# python: ${graphifyPython} " (builtins.readFile graphifyLock);
-        message = "claude-sandbox: ${toString graphifyLock} wasn't generated for ${graphifySpec} on Python ${graphifyPython}; regenerate it with claude-sandbox-graphify-lock (see UPDATES.md).";
-      }
-      {
-        assertion = lib.hasInfix ":${graphifyPython}." graphifyImage;
-        message = "claude-sandbox: graphifyImage (${graphifyImage}) isn't Python ${graphifyPython}, which the graphify lock is resolved for.";
-      }
-    ];
+    config.home.packages = [ (sandboxLauncher "claude") (sandboxLauncher "claude-sandbox") claudeOpen ];
   };
 }

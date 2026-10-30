@@ -21,19 +21,12 @@
     nix-flatpak.url = "github:gmodena/nix-flatpak";
 
     # The ticket workflow (commands, Claude Code plugin, Obsidian vault setup),
-    # its own repo. See modules/apps/claude-tickets.nix. To try local changes
+    # its own repo (andy-ct on Bitbucket, fetched over ssh with your Bitbucket
+    # key). See modules/apps/claude-tickets.nix. To try local changes
     # before pushing: --override-input claude-tickets
-    # git+file:///home/ato/Projects/github/zero4573/claude-tickets
+    # git+file:///home/ato/Projects/repo-work/bitbucket/streamsix/andy-ct
     claude-tickets = {
-      url = "github:zero4573/claude-tickets";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # fff: fast file and content search, served to every sandboxed Claude
-    # session as the `fff` MCP server (its fff-mcp package). See
-    # modules/apps/claude/claude-sandbox.nix (extraMcpServers).
-    fff = {
-      url = "github:dmtrKovalenko/fff";
+      url = "git+ssh://git@ssh.bitbucket.org/streamsix/andy-ct.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

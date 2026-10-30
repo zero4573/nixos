@@ -44,7 +44,6 @@ host live under `modules/apps/`:
 flowchart LR
     claude["claude / claude-sandbox launcher"] -->|"podman run"| container["sandbox container: claude, nested podman"]
     claude -->|"sandbox-proxy start"| proxy["sandbox-proxy: registry and MCP brokers"]
-    claude -->|"pod sidecar"| graphify["graphify sidecar"]
     container -->|"credential-free URLs"| proxy
     container -->|"read-only mounts"| host["host: /nix/store, asdf installs, nix-daemon socket"]
     proxy -->|"1Password"| secrets["real credentials"]

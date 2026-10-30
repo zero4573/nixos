@@ -30,6 +30,13 @@ if [[ "$1" == pod && "$2" == exists ]]; then exit 1; fi
 if [[ "$1" == inspect ]]; then exit 1; fi
 if [[ "$1" == run ]]; then
   printf '%s\n' "$@" > "$STUB_OUT/run.args"
+  # STUB_USAGE: a status line's usage file, written as the container would,
+  # then left for the launcher's relay (which polls every 2s) to report
+  if [[ -n "${STUB_USAGE:-}" ]]; then
+    dir="$(printf '%s\n' "$@" | sed -n 's/^CLAUDE_SANDBOX_HERDR_DIR=//p')"
+    printf '%b' "$STUB_USAGE" > "$dir/usage"
+    sleep 3
+  fi
   prev=
   for a in "$@"; do
     if [[ "$prev" == -v && "$a" == *:*/.tool-versions:ro ]]; then
@@ -58,6 +65,10 @@ STUB
 echo 'exit 0' | stub xdg-dbus-proxy
 echo 'exit 1' | stub sandbox-proxy
 echo 'exit 0' | stub git-update
+# herdr appends each call's arguments, one per line, then an "--end" line
+stub herdr <<'STUB'
+{ printf '%s\n' "$@"; echo --end; } >> "$STUB_OUT/herdr.calls"
+STUB
 chmod +x "$stubs"/*
 
 # run_case <name> [claude args...]: a fresh HOME and project (the case's
@@ -72,7 +83,6 @@ run_case() {
   XDG_STATE_HOME="$root/state" \
   XDG_RUNTIME_DIR="$root/run" \
   DBUS_SESSION_BUS_ADDRESS=disabled \
-  CLAUDE_SANDBOX_NO_GRAPHIFY=1 \
   CLAUDE_SANDBOX_TEST="${sandbox_test:-1}" \
   STUB_NIX_TRUSTED="${stub_nix_trusted:-0}" \
   CLAUDE_CODE=/nix/store/fake-claude \
@@ -84,11 +94,14 @@ run_case() {
   ASDF_VM_BIN=/nix/store/fake-asdf/bin \
   CLAUDE_GIT_UPDATE="$stubs/git-update" \
   GIT_SSH_BROKER="${git_ssh_broker:-}" \
+  HERDR_ENV="${herdr_env:-}" \
+  HERDR_PANE_ID="${herdr_pane:-}" \
+  HERDR_BIN="${herdr_bin:-}" \
   GIT_GLOBAL_IGNORE=/nix/store/fake-ignore \
   GIT_GLOBAL_CONFIG=/nix/store/fake-gitconfig \
   CACERT_BUNDLE=/nix/store/fake-ca.crt \
   NIX_DAEMON_SOCKET_DIR="${nix_socket_dir:-$root/no-daemon}" \
-  GRAPHIFY_SIDECAR="" GRAPHIFY_IMAGE="" GRAPHIFY_LOCK="" GRAPHIFY_INSTALL="" EXTRA_MCP_CONFIG="" \
+  EXTRA_MCP_CONFIG="" \
   bash -euo pipefail "$script" "$@" > "$out/stdout" 2> "$out/stderr" \
     || { fail "$out: the launch failed (exit $?)"; cat "$out/stderr" >&2; }
 }
@@ -403,6 +416,45 @@ if [[ -n "${GIT_SSH_BROKER:-}" ]] && command -v ssh-agent >/dev/null && command 
   if mounts broker | grep -q '\.1password\|/run/user'; then fail "broker: a host agent is mounted: $(mounts broker)"; else ok "broker: no host agent mounted"; fi
 else
   echo "skip: broker cases (set GIT_SSH_BROKER to a git-ssh-broker binary; needs ssh-agent, ssh-keygen)"
+fi
+
+# herdr: in a herdr pane, a directory for the status line's usage file is
+# mounted and named in CLAUDE_SANDBOX_HERDR_DIR, and the launcher clears the
+# pane's usage rows on exit; outside one, neither
+home="$root/home-herdr"
+mkdir -p "$home/proj"
+cd "$home/proj"
+STUB_USAGE='ctx 12k\n\n\n5h ▰▱▱▱▱ 20%\e[31m\n' \
+  herdr_env=1 herdr_pane=w1:p1 herdr_bin="$stubs/herdr" run_case herdr
+herdr_dir="$(awk '$0 == "-e" { getline; if (sub(/^CLAUDE_SANDBOX_HERDR_DIR=/, "")) print }' "$root/out-herdr/run.args")"
+if [[ -n "$herdr_dir" ]] && has_mount herdr "$herdr_dir:$herdr_dir"; then
+  ok "herdr: the usage directory is mounted and named"
+else
+  fail "herdr: dir '$herdr_dir', mounts: $(mounts herdr)"
+fi
+if grep -qx 'ctx_ok=ctx 12k' "$root/out-herdr/herdr.calls" 2>/dev/null \
+  && grep -qx 'five_hour=5h ▰▱▱▱▱ 20%\[31m' "$root/out-herdr/herdr.calls" \
+  && grep -qx 'reset=' "$root/out-herdr/herdr.calls"; then
+  ok "herdr: the container's usage file is reported, control characters removed"
+else
+  fail "herdr: calls: $(cat "$root/out-herdr/herdr.calls" 2>/dev/null)"
+fi
+if [[ "$(sed -n '/^--token$/{n;p}' "$root/out-herdr/herdr.calls" 2>/dev/null | tail -10 | grep -c '=$')" == 10 ]] \
+  && grep -qx 'w1:p1' "$root/out-herdr/herdr.calls"; then
+  ok "herdr: the pane's usage rows are cleared on exit"
+else
+  fail "herdr: calls: $(cat "$root/out-herdr/herdr.calls" 2>/dev/null)"
+fi
+if [[ -n "$herdr_dir" && ! -e "$herdr_dir" ]]; then
+  ok "herdr: the usage directory is removed"
+else
+  fail "herdr: $herdr_dir is left behind"
+fi
+herdr_bin="$stubs/herdr" run_case noherdr
+if grep -q CLAUDE_SANDBOX_HERDR_DIR "$root/out-noherdr/run.args" || [[ -e "$root/out-noherdr/herdr.calls" ]]; then
+  fail "noherdr: relay set up outside herdr"
+else
+  ok "noherdr: no relay outside herdr"
 fi
 
 if (( failures > 0 )); then

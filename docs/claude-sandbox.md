@@ -23,7 +23,7 @@ sequenceDiagram
     L->>L: parse --add-dir, --settings, --mcp-config, path flags
     L->>L: git fetch and fast-forward the checkout
     L->>P: sandbox-proxy start (reuses running containers)
-    L->>L: create pod in aisandbox.slice, start graphify sidecar
+    L->>L: create pod in aisandbox.slice
     L->>L: compute mounts from Claude settings
     L->>L: mount the managed settings (skip and warn if MANAGED_SETTINGS is unset)
     L->>L: generate ~/.tool-versions
@@ -178,12 +178,16 @@ flowchart TD
 
 ## Other pieces
 
-- **graphify sidecar** (`claude-sandbox-graphify-sidecar.sh`): builds a code
-  knowledge graph of the project and every `--add-dir` codebase and serves it as
-  the `graphify` MCP server on the pod's localhost. Skip it with
-  `CLAUDE_SANDBOX_NO_GRAPHIFY=1`.
-- **extra MCP servers**: `programs.claudeSandbox.extraMcpServers` (by default
-  `fff`) are merged with the proxy's and graphify's.
+- **extra MCP servers**: `programs.claudeSandbox.extraMcpServers` (none by
+  default) are merged with the proxy's.
+- **language servers**: `programs.claudeSandbox.lspServers` (by default gopls,
+  typescript-language-server, ruby-lsp, terraform-ls, bash-language-server,
+  yaml-language-server, nixd and basedpyright; none for SQL, HAML or ERB) become a
+  Claude Code plugin (`.lsp.json`) that both `claude` and `claude-open` load
+  with `--plugin-dir`; `ENABLE_LSP_TOOL=1` (claude-code.nix) turns on the LSP
+  tool, and the `lsp` skill tells Claude when to use it. Servers start on
+  demand for the files they claim; ruby-lsp writes a self-ignored `.ruby-lsp/`
+  in the working directory.
 - **resource limits**: pod and containers run under `aisandbox.slice`.
-- **pins**: the images (by digest), claude-code (flake nixpkgs) and graphify (hashed
-  pip lock) are pinned; see [`UPDATES.md`](../UPDATES.md).
+- **pins**: the image (by digest) and claude-code (flake nixpkgs) are pinned; see
+  [`UPDATES.md`](../UPDATES.md).

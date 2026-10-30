@@ -1,6 +1,6 @@
 _: {
   # systemd user slice for every AI sandbox container (claude-sandbox pods,
-  # their graphify sidecars, the ticket code-graph containers, npm-sandbox): podman places them
+  # npm-sandbox): podman places them
   # here through --cgroup-parent=aisandbox.slice.
   #  * CPUWeight/IOWeight: the desktop session wins under contention
   #  * MemoryHigh: past this, the slice is throttled and reclaimed

@@ -35,7 +35,6 @@ warn() {
 #                               host port, e.g. 3000,5173
 #   CLAUDE_SANDBOX_NAME         pod label instead of <repo>-<folder>
 #   CLAUDE_SANDBOX_QUIET=1      only warnings while launching
-#   CLAUDE_SANDBOX_NO_GRAPHIFY=1  no graphify sidecar for this session
 #   CLAUDE_SANDBOX_PASS_ENV     space-separated globs of host environment
 #                               variables to pass in, e.g. "CLAUDE_TICKETS_*"
 #   CLAUDE_SANDBOX_RO_PATHS     colon-separated host paths to mount read-only
@@ -100,11 +99,6 @@ Sandbox settings (environment):
   CLAUDE_SANDBOX_PORTS=3000,5173   publish ports on the same host ports
   CLAUDE_SANDBOX_NAME=<label>      pod claude-sandbox-<label>
   CLAUDE_SANDBOX_QUIET=1           only print warnings while launching
-  CLAUDE_SANDBOX_NO_GRAPHIFY=1     skip the graphify sidecar (it's also
-                                   skipped when an --mcp-config already
-                                   defines a graphify server); it graphs
-                                   the project and every --add-dir
-                                   codebase into one merged graph
   CLAUDE_SANDBOX_PASS_ENV="A_* B"  host variables to pass in (name globs)
   CLAUDE_SANDBOX_RO_PATHS=/a:~/b   host paths mounted read-only at the same
                                    path in every session (programs.
@@ -135,8 +129,6 @@ for p in "${ports[@]}"; do
   fi
   port_flags+=(-p "$p:$p")
 done
-graphify_enabled=1
-[[ "${CLAUDE_SANDBOX_NO_GRAPHIFY:-}" == 1 ]] && graphify_enabled=0
 name_override="${CLAUDE_SANDBOX_NAME:-}"
 
 # The arguments the sandbox reads (never changes): --add-dir (variadic, like
@@ -171,7 +163,7 @@ project_root="$PWD"
 log "launching in $project_root (log: $launch_log)"
 
 # Fast-forward a git checkout to its upstream before anything else, so the
-# graphify sidecar's startup build and watch begin on the updated tree
+# session starts on the updated tree
 if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   log "updating the git checkout (git fetch, at most 30s)"
   "$CLAUDE_GIT_UPDATE" "$project_root"
@@ -197,10 +189,15 @@ cleanup() {
   fi
   [[ -n "${dbus_proxy_pid:-}" ]] && kill "$dbus_proxy_pid" 2>/dev/null || true
   [[ -n "${git_broker_pid:-}" ]] && kill "$git_broker_pid" 2>/dev/null || true
+  if [[ -n "${herdr_watch_pid:-}" ]]; then
+    kill "$herdr_watch_pid" 2>/dev/null || true
+    herdr_report ""  # clears the pane's usage rows
+  fi
   [[ -n "${pod_name:-}" ]] && podman pod rm -f -t 5 "$pod_name" >/dev/null 2>&1 || true
   [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]] && rm -rf "$tmp_dir"
   [[ -n "${dbus_proxy_dir:-}" && -d "$dbus_proxy_dir" ]] && rm -rf "$dbus_proxy_dir"
   [[ -n "${git_broker_dir:-}" && -d "$git_broker_dir" ]] && rm -rf "$git_broker_dir"
+  [[ -n "${herdr_dir:-}" && -d "$herdr_dir" ]] && rm -rf "$herdr_dir"
   return 0  # under set -e, a false last test above would become the exit status
 }
 trap cleanup EXIT
@@ -355,10 +352,7 @@ if [[ -n "${GIT_SSH_BROKER:-}" ]]; then
   fi
 fi
 
-# Claude and the graphify sidecar share one pod, and with it a network
-# namespace, so the sidecar's MCP endpoint is reachable on Claude's
-# localhost without being published anywhere else. Ports and networks are
-# set on the pod.
+# Claude runs in a pod of its own; ports and networks are set on the pod.
 #
 # Everything is named after the git repo (origin's URL, else the first
 # remote) plus the checkout folder, e.g. claude-sandbox-billing-service-db4005a08
@@ -396,9 +390,9 @@ name_labels=(
   --label "claude-sandbox.repo=${repo_name:-}"
 )
 # Pods of sessions that died without cleaning up (killed, terminal closed,
-# reboot) keep their graphify sidecar running. Remove the ones whose claude
-# container is gone and that are over 10 minutes old (a new session's pod
-# legitimately runs only its sidecar for minutes while the graph builds).
+# reboot) are left behind. Remove the ones whose claude container is gone and
+# that are over 10 minutes old (a new session's pod has no claude container
+# until the launch gets that far).
 # (podman calls hang when another podman process holds its storage lock, so
 # this is where a stuck podman first shows)
 log "podman: checking for orphaned claude-sandbox pods"
@@ -441,152 +435,8 @@ while [[ -z "$pod_name" ]]; do
 done
 log "pod $pod_name"
 
-# graphify sidecar: builds a code graph of the project into ./graphify-out
-# (local tree-sitter, no LLM), keeps it current, and serves it to Claude as
-# an MCP server.
-graphify_mcp_config=""
-# Set when the session ends up with a `graphify` MCP server (the sidecar's or
-# the caller's); passed in as GRAPHIFY_MCP=1 so Claude's SessionStart hook
-# (modules/apps/claude/claude-code.nix) steers it to the graph tools
-graphify_attached=0
-
-# Preflight: is there any source file graphify's code-only pass can parse,
-# in the same file set it would scan -- git's view (tracked + untracked,
-# minus ignored) in a git checkout, otherwise a walk that prunes graphify's
-# default skip dirs? No parseable code means no sidecar.
-# Extensions mirror graphify.detect.CODE_EXTENSIONS for the pinned
-# graphifyVersion (minus .json, which on its own isn't worth a graph) --
-# refresh this list when bumping it.
-graphify_code_re='\.(F|F03|F08|F90|F95|asd|astro|bash|c|cbl|cc|cjs|cl|cls|cob|cobol|cpp|cpy|cs|cshtml|csproj|cts|cu|cuh|cxx|dart|dfm|dm|dme|dmf|dmi|dmm|dpk|dpr|ejs|erl|escript|ets|ex|exs|f|f03|f08|f90|f95|fsproj|go|gradle|groovy|h|hcl|hpp|hrl|inc|java|jl|js|jsx|kt|kts|lfm|lisp|lpk|lpr|lsp|lua|luau|m|metal|mjs|ml|mli|mm|mts|pas|php|pp|ps1|psd1|psm1|py|r|rake|razor|rb|resource|robot|rs|scala|sh|sln|slnx|sol|sql|sv|svelte|svh|swift|tf|tfvars|toc|trigger|ts|tsx|v|vb|vbproj|vue|xaml|zig)$'
-has_graphify_sources() {  # has_graphify_sources <dir>
-  if git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$1" ls-files -z --cached --others --exclude-standard -- . 2>/dev/null
-  else
-    find "$1" -mindepth 1 \
-      \( -type d \( -name node_modules -o -name venv -o -name .venv -o -name __pycache__ \
-        -o -name dist -o -name build -o -name target -o -name site-packages -o -name lib64 \
-        -o -name graphify-out -o -name '*.egg-info' -o -name '.*' \) -prune \) \
-      -o -type f -print0 2>/dev/null
-  fi | grep -zqE "$graphify_code_re"
-}
-
-# A session that already brings a graphify MCP server (--mcp-config, e.g.
-# a merged graph of several repos) doesn't need the repo sidecar
-if [[ "$graphify_enabled" == 1 ]]; then
-  for m in "${mcp_args[@]}"; do
-    if [[ "$m" == \{* ]]; then json="$m"; else json="$(cat "$m" 2>/dev/null || true)"; fi
-    if jq -e '.mcpServers.graphify' >/dev/null 2>&1 <<< "$json"; then
-      log "graphify: the session brings its own graphify server, skipping the sidecar"
-      graphify_enabled=0
-      graphify_attached=1
-      break
-    fi
-  done
-fi
-if [[ "$graphify_enabled" == 1 ]]; then
-  log "graphify: looking for source files it can parse"
-  if ! has_graphify_sources "$project_root"; then
-    log "graphify: no source files it can parse here, skipping the sidecar"
-    graphify_enabled=0
-  fi
-fi
-
-# The --add-dir codebases get graphed too (merged with the project's into
-# the one graph the sidecar serves), each with parseable code and not
-# overlapping the project or another one already taken: a parent of the
-# project (say ~/Projects) would mean graphing everything under it
-graphify_extra_roots=()
-if [[ "$graphify_enabled" == 1 ]]; then
-  graphify_roots=("$(realpath -m "$project_root")")
-  for d in "${add_dirs[@]}"; do
-    [[ "$d" == "~"* ]] && d="$HOME${d#\~}"
-    [[ "$d" == /* ]] || d="$PWD/$d"
-    [[ -d "$d" && "$d" != *$'\n'* ]] || continue
-    d="$(realpath "$d")"
-    overlap=0
-    for r in "${graphify_roots[@]}"; do
-      if [[ "$d" == "$r" || "$d" == "$r"/* || "$r" == "$d"/* ]]; then
-        overlap=1
-        break
-      fi
-    done
-    if [[ "$overlap" == 1 ]]; then
-      log "graphify: --add-dir $d overlaps a directory already graphed, not graphing it"
-    elif ! has_graphify_sources "$d"; then
-      log "graphify: --add-dir $d has no source files it can parse, not graphing it"
-    else
-      graphify_roots+=("$d")
-      graphify_extra_roots+=("$d")
-    fi
-  done
-  if [[ ${#graphify_extra_roots[@]} -gt 0 ]]; then
-    log "graphify: also graphing ${graphify_extra_roots[*]}"
-  fi
-fi
-
-if [[ "$graphify_enabled" == 1 ]]; then
-  graphify_port=47100
-  graphify_key="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
-  graphify_extra_mounts=()
-  for r in "${graphify_extra_roots[@]}"; do
-    graphify_extra_mounts+=(-v "$r:$r:rw")
-  done
-  log "graphify: starting the sidecar (pulls its image on first use)"
-  systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
-  podman run -d --rm \
-    --name "$pod_name-graphify" \
-    --pod "$pod_name" \
-    "${name_labels[@]}" \
-    --label claude-sandbox.role=graphify \
-    --pull=missing \
-    -v claude-sandbox-graphify:/opt/graphify \
-    -v "$GRAPHIFY_SIDECAR:/sidecar.sh:ro" \
-    -v "$GRAPHIFY_INSTALL:/graphify-install.sh:ro" \
-    -v "$project_root:$project_root:rw" \
-    "${graphify_extra_mounts[@]}" \
-    -v "$GRAPHIFY_LOCK:/graphify-requirements.txt:ro" \
-    -e GRAPHIFY_PORT="$graphify_port" \
-    -e GRAPHIFY_API_KEY="$graphify_key" \
-    -e PROJECT_ROOT="$project_root" \
-    -e EXTRA_ROOTS="$(printf '%s\n' "${graphify_extra_roots[@]}")" \
-    -e GRAPHIFY_QUERY_LOG_DISABLE=1 \
-    "$GRAPHIFY_IMAGE" \
-    sh /sidecar.sh >/dev/null
-  # First run pip-installs graphify and the first graph build of a large
-  # repo can take a while, so wait for the MCP endpoint before starting Claude,
-  # reporting the last line of the sidecar's log every 15s meanwhile
-  log "graphify: waiting for the MCP server, at most 5 min; installing graphify and building the code graph can take minutes on a large or first-time project (--no-graphify skips it, podman logs -f $pod_name-graphify follows it)"
-  graphify_ready=0
-  for i in $(seq 1 300); do
-    if [[ "$(podman inspect -f '{{.State.Running}}' "$pod_name-graphify" 2>/dev/null)" != true ]]; then
-      warn "graphify: the sidecar exited"
-      break
-    fi
-    if (( i % 15 == 0 )); then
-      log "graphify: still waiting; sidecar: $(podman logs --tail 1 "$pod_name-graphify" 2>&1 | tail -n1 | cut -c1-160)"
-    fi
-    if podman exec "$pod_name-graphify" python3 -c \
-        'import socket, sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1)' \
-        "$graphify_port" 2>/dev/null; then
-      graphify_ready=1
-      break
-    fi
-    sleep 1
-  done
-
-  if [[ "$graphify_ready" == 1 ]]; then
-    log "graphify: ready"
-    graphify_attached=1
-    graphify_mcp_config="{\"mcpServers\":{\"graphify\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:$graphify_port/mcp\",\"headers\":{\"Authorization\":\"Bearer $graphify_key\"}}}}"
-  else
-    warn "graphify: the sidecar didn't come up, continuing without it:"
-    podman logs --tail 20 "$pod_name-graphify" >&2 2>&1 || true
-    podman rm -f -t 0 "$pod_name-graphify" >/dev/null 2>&1 || true
-  fi
-fi
-
-# Stdio MCP servers every session gets (programs.claudeSandbox.extraMcpServers,
-# e.g. fff), from a config file in the store
+# Stdio MCP servers every session gets (programs.claudeSandbox.extraMcpServers),
+# from a config file in the store
 extra_mcp_config=""
 if [[ -n "${EXTRA_MCP_CONFIG:-}" ]]; then
   extra_mcp_config="$(cat "$EXTRA_MCP_CONFIG")"
@@ -598,11 +448,16 @@ fi
 # prompt as another config file. claude merges it with any --mcp-config of
 # the caller.
 mcp_flags=()
-if [[ -n "$proxy_mcp_config$graphify_mcp_config$extra_mcp_config" ]]; then
-  printf '%s\n' "$proxy_mcp_config" "$graphify_mcp_config" "$extra_mcp_config" \
+if [[ -n "$proxy_mcp_config$extra_mcp_config" ]]; then
+  printf '%s\n' "$proxy_mcp_config" "$extra_mcp_config" \
     | jq -s '{mcpServers: (map(select(. != null) | .mcpServers) | add)}' > "$tmp_dir/mcp.json"
   mounts+=(-v "$tmp_dir/mcp.json:$tmp_dir/mcp.json:ro")
   mcp_flags+=("--mcp-config=$tmp_dir/mcp.json")
+fi
+# The language servers' plugin (programs.claudeSandbox.lspServers), a store
+# path the container reaches through the /nix/store mount
+if [[ -n "${CLAUDE_LSP_PLUGIN:-}" ]]; then
+  mcp_flags+=(--plugin-dir "$CLAUDE_LSP_PLUGIN")
 fi
 
 # Mounts, from Claude's own view of what the session may touch:
@@ -982,9 +837,16 @@ for d in "$project_root" "${rw_dirs[@]}"; do
   [[ -d "$d/.obsidian" && -z "${mount_mode[$d/.obsidian]:-}" ]] && protect_mounts+=(-v "$d/.obsidian:$d/.obsidian:ro")
 done
 
+# The terminal's own TERM and COLORTERM: podman's default is TERM=xterm
+# with no COLORTERM, and Claude Code then drops to a reduced palette where
+# its highlights (selection, diffs) barely show
+env_pass=()
+for v in TERM COLORTERM; do
+  [[ -n "${!v:-}" ]] && env_pass+=(-e "$v=${!v}")
+done
+
 # Host variables passed in: CLAUDE_SANDBOX_PASS_ENV, space-separated name
 # globs (e.g. set by the system config for tools used inside the sandbox)
-env_pass=()
 read -ra pass_globs <<< "${CLAUDE_SANDBOX_PASS_ENV:-}"
 if [[ ${#pass_globs[@]} -gt 0 ]]; then
   while IFS= read -r v; do
@@ -996,6 +858,47 @@ if [[ ${#pass_globs[@]} -gt 0 ]]; then
       fi
     done
   done < <(compgen -e)
+fi
+
+# herdr's usage rows (modules/apps/herdr): the status line script can't
+# reach herdr from the container, and herdr's socket would let the sandbox
+# drive every pane, so it writes its fields, one per line, to a file in a
+# directory mounted from the host (CLAUDE_SANDBOX_HERDR_DIR), and this
+# launcher, which runs in the herdr pane, reports them. Values are cut to
+# 64 characters with control characters removed; a symlink is ignored.
+herdr_mounts=()
+herdr_env_flags=()
+herdr_tokens=(ctx_ok ctx_warn ctx_hot five_hour five_hour_warn five_hour_hot
+  seven_day seven_day_warn seven_day_hot reset)
+# herdr_report <file>: the file's lines as the tokens, in order; "" clears them
+herdr_report() {
+  local fields=() args=() v i
+  [[ -n "$1" && -f "$1" && ! -L "$1" ]] && mapfile -t -n "${#herdr_tokens[@]}" fields < "$1"
+  for i in "${!herdr_tokens[@]}"; do
+    v="${fields[i]:-}"
+    v="${v//[[:cntrl:]]/}"
+    args+=(--token "${herdr_tokens[i]}=${v:0:64}")
+  done
+  "$HERDR_BIN" pane report-metadata "$HERDR_PANE_ID" --source claude-usage \
+    --seq "$(date +%s%N)" "${args[@]}" >/dev/null 2>&1 || true
+}
+if [[ "${HERDR_ENV:-}" == 1 && -n "${HERDR_PANE_ID:-}" && -n "${HERDR_BIN:-}" ]]; then
+  herdr_dir="$(mktemp -d)"
+  herdr_mounts=(-v "$herdr_dir:$herdr_dir")
+  herdr_env_flags=(-e "CLAUDE_SANDBOX_HERDR_DIR=$herdr_dir")
+  (
+    last=
+    while sleep 2; do
+      cur=
+      [[ -f "$herdr_dir/usage" && ! -L "$herdr_dir/usage" ]] \
+        && { IFS= read -r -d '' cur < "$herdr_dir/usage" || true; }
+      if [[ "$cur" != "$last" ]]; then
+        herdr_report "$herdr_dir/usage"
+        last="$cur"
+      fi
+    done
+  ) &
+  herdr_watch_pid=$!
 fi
 
 # Only ask podman for a TTY when there is one, so headless runs (claude -p
@@ -1021,10 +924,9 @@ done
 #
 # --init puts catatonit at PID 1, not claude: it reaps the orphans claude's
 # tools leave behind (git's helpers pile up as zombies until the pids limit
-# is hit otherwise), and stdio MCP servers get claude as a real parent.
-# fff-mcp, for one, watches its parent to know when to exit; with PID 1 as
-# its parent it can't, so it exits after an hour idle instead and claude
-# can't bring it back.
+# is hit otherwise), and stdio MCP and language servers get claude as a
+# real parent: one that watches its parent to know when to exit can't with
+# PID 1 as its parent.
 log "starting claude in $pod_name-claude (pulls its image on first use)"
 claude_started=1
 # Container-only managed settings (the kill and delete allow rules), set
@@ -1036,6 +938,8 @@ else
   echo "claude-sandbox: MANAGED_SETTINGS is unset; kill and delete commands keep Claude's default permission checks" >&2
 fi
 
+# --tz=local copies the host's /etc/localtime in, so times Claude shows
+# (/usage resets, timestamps) are the system's rather than UTC
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
 podman run --rm "${tty_flags[@]}" \
   --init \
@@ -1045,6 +949,7 @@ podman run --rm "${tty_flags[@]}" \
   --label claude-sandbox.role=claude \
   --privileged \
   --pull=missing \
+  --tz=local \
   -v /nix/store:/nix/store:ro \
   -v /var/lib/containers \
   -v "$project_root:$project_root:$project_mode" \
@@ -1060,6 +965,7 @@ podman run --rm "${tty_flags[@]}" \
   "${protect_mounts[@]}" \
   "${dbus_mounts[@]}" \
   "${git_mounts[@]}" \
+  "${herdr_mounts[@]}" \
   -e HOME="$HOME" \
   -e ASDF_DATA_DIR="$asdf_data_dir" \
   -e SSL_CERT_FILE="$CACERT_BUNDLE" \
@@ -1071,7 +977,7 @@ podman run --rm "${tty_flags[@]}" \
   "${dbus_env_flags[@]}" \
   "${nix_env_flags[@]}" \
   "${env_pass[@]}" \
-  -e GRAPHIFY_MCP="$graphify_attached" \
+  "${herdr_env_flags[@]}" \
   "$CLAUDE_SANDBOX_IMAGE" \
   "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${mcp_flags[@]}" "$@"
 code=$?
