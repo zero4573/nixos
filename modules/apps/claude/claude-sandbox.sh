@@ -77,9 +77,9 @@ What the session can see and change:
   * kiro's own state is the sandbox's, not the host's: ~/.kiro and
     ~/.local/share/kiro-cli are ~/.local/share/kiro-sandbox/{kiro,data},
     so sessions, workspace trust and "always allow" rules given in the
-    sandbox stay in the sandbox and never reach kiro-open. The first launch
-    copies your host login (data.sqlite3) in; if it expires, run
-    `kiro login --use-device-flow`
+    sandbox stay in the sandbox and never reach kiro-open. So is the login:
+    a chat started while the sandbox isn't logged in runs
+    `kiro-cli login --use-device-flow` first, and the login is kept
   * from the host, read-only: ~/.kiro/{agents,skills,steering,hooks,powers}
     and a throwaway copy of ~/.kiro/settings, whose mcp.json is the host's
     servers plus sandbox-proxy's and programs.kiroSandbox.extraMcpServers;
@@ -980,42 +980,24 @@ fi
 #    what a session changes there is gone at exit
 # The data dir is separate too: kiro-cli extracts the runtimes it runs (bun,
 # node, the agent server under kas/) there, and a sandbox must not be able to
-# replace what the host executes. It gets the host's login once: a copy of
-# data.sqlite3 (sqlite's .backup, consistent while the host runs kiro), minus
-# conversations and the records of extracted runtimes.
+# replace what the host executes. The login (data.sqlite3 in it) is the
+# sandbox's own too: a chat logs in first when it isn't (below), and the
+# login stays in the data dir across sessions.
 if [[ "$agent" == kiro ]]; then
   # With an agent profile (AGENT=<profile>, modules/apps/agents) its home
-  # takes ~/.kiro's place (KIRO_HOME of kiro-open), its login is in
-  # <home>/.data/kiro-cli (kiro-open's XDG_DATA_HOME) and the sandbox's own
-  # state in <home>/.sandbox
+  # takes ~/.kiro's place (KIRO_HOME of kiro-open) and the sandbox's own
+  # state is in <home>/.sandbox
   if [[ -n "${AGENT_HOME:-}" ]]; then
     [[ "$AGENT_HOME" == /* ]] || { echo "$sandbox_name: AGENT_HOME must be absolute: $AGENT_HOME" >&2; exit 1; }
     kiro_home="$AGENT_HOME"
     kiro_state="$AGENT_HOME/.sandbox"
-    host_db="$AGENT_HOME/.data/kiro-cli/data.sqlite3"
     log "profile ${AGENT_PROFILE:-?}: kiro's config in $kiro_home"
   else
     kiro_home="$HOME/.kiro"
     kiro_state="${XDG_DATA_HOME:-$HOME/.local/share}/kiro-sandbox"
-    host_db="$HOME/.local/share/kiro-cli/data.sqlite3"
   fi
   mkdir -p "$kiro_state/kiro" "$kiro_state/data"
   chmod 700 "$kiro_state"
-  sandbox_db="$kiro_state/data/data.sqlite3"
-  if [[ ! -e "$sandbox_db" && -f "$host_db" ]]; then
-    log "kiro: copying your kiro-cli login into $kiro_state/data (once)"
-    if sqlite3 "$host_db" ".backup '$sandbox_db'" 2>/dev/null; then
-      chmod 600 "$sandbox_db"
-      for t in conversations conversations_v2 history extracted_kas_versions pinned_bin_versions; do
-        sqlite3 "$sandbox_db" "DELETE FROM $t;" 2>/dev/null || true
-      done
-    else
-      rm -f "$sandbox_db"
-      warn "kiro: couldn't copy the host login; run 'kiro login --use-device-flow' in the sandbox"
-    fi
-  elif [[ ! -e "$sandbox_db" ]]; then
-    log "kiro: no host login to copy; run 'kiro login --use-device-flow' in the sandbox"
-  fi
   agent_mounts=(
     -v "$kiro_state/kiro:$HOME/.kiro:rw"
     -v "$kiro_state/data:$HOME/.local/share/kiro-cli:rw"
@@ -1068,6 +1050,27 @@ if [[ "$agent" == kiro && "${SANDBOX_TRUST_ALL:-1}" != 0 ]] && { (( $# == 0 )) |
     fi
     log "kiro: the chat trusts all tools (SANDBOX_TRUST_ALL=0 to be asked)"
   fi
+fi
+
+# kiro logs in by itself: an interactive chat first checks the sandbox's
+# login (`kiro-cli whoami`, inside the container, against its own data dir)
+# and runs `kiro-cli login --use-device-flow` when there is none or it can't
+# be refreshed; the chat starts once the login succeeds. The device flow
+# prints a URL and code to open in the host's browser, as no browser
+# redirect reaches the container. Not for other subcommands (login, whoami,
+# ...) or headless runs, which have no one to answer it (SANDBOX_TEST_TTY=1
+# stands in for a terminal in the script's test only).
+kiro_tty=0
+[[ -t 0 && -t 1 ]] && kiro_tty=1
+[[ "${SANDBOX_TEST:-}" == 1 && "${SANDBOX_TEST_TTY:-}" == 1 ]] && kiro_tty=1
+if [[ "$agent" == kiro && "$kiro_tty" == 1 ]] && { (( $# == 0 )) || [[ "$1" == chat ]]; }; then
+  # shellcheck disable=SC2016 # expanded by the container's bash
+  kiro_login_first='"$1" whoami >/dev/null 2>&1 || {
+  echo "kiro: this sandbox is not logged in to kiro-cli; logging in (the login is kept for later sessions)" >&2
+  "$1" login --use-device-flow || exit
+}
+exec "$@"'
+  agent_cmd=(bash -c "$kiro_login_first" kiro-login "${agent_cmd[@]}")
 fi
 for d in "$project_root" "${rw_dirs[@]}"; do
   [[ -d "$d/.obsidian" && -z "${mount_mode[$d/.obsidian]:-}" ]] && protect_mounts+=(-v "$d/.obsidian:$d/.obsidian:ro")

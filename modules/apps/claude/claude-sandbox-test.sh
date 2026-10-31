@@ -7,6 +7,9 @@
 set -euo pipefail
 # The sandbox settings of the shell running the test never reach a case
 while IFS= read -r v; do unset "$v"; done < <(compgen -e | grep -E '^(SANDBOX|CLAUDE_SANDBOX|KIRO_SANDBOX)_' || true)
+# Nor does an agent session's own profile (run from claude/kiro, these point
+# at the real profile home), or the cases would use it instead of their HOME
+unset AGENT AGENT_HOME AGENT_PROFILE KIRO_HOME CLAUDE_CONFIG_DIR XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME
 
 script="$(realpath "${1:-$(dirname "${BASH_SOURCE[0]}")/claude-sandbox.sh}")"
 root="$(realpath "$(mktemp -d)")"
@@ -554,16 +557,72 @@ else
   fail "kiro: container name: $(grep -A1 -x -- --name "$root/out-kiro/run.args")"
 fi
 if mounts kiro | grep -q '/etc/claude-code/' || grep -q 'MANAGED_SETTINGS' "$root/out-kiro/stderr"; then fail "kiro: managed settings involved"; else ok "kiro: no managed settings"; fi
-# K2. The host login is copied in once (sqlite .backup), minus conversations
-if [[ "$(cat "$state/data/data.sqlite3" 2>/dev/null)" == copied ]] \
-  && grep -qF "$home/.local/share/kiro-cli/data.sqlite3 .backup '$state/data/data.sqlite3'" "$root/out-kiro/sqlite3.calls" \
-  && grep -qF 'DELETE FROM conversations;' "$root/out-kiro/sqlite3.calls"; then
-  ok "kiro: the host login is copied into the sandbox's data dir"
+# K2. The host login is never copied or read: a chat in a terminal logs in
+# first when the sandbox isn't (kiro-cli whoami || kiro-cli login, then the
+# chat); other subcommands and headless runs start kiro-cli directly
+if [[ -e "$state/data/data.sqlite3" || -e "$root/out-kiro/sqlite3.calls" ]]; then
+  fail "kiro: the host login is copied: $(cat "$root/out-kiro/sqlite3.calls" 2>&1)"
 else
-  fail "kiro: login copy: $(cat "$root/out-kiro/sqlite3.calls" 2>&1)"
+  ok "kiro: the host login isn't copied into the sandbox"
 fi
-sandbox_agent=kiro run_case kiro-again
-if [[ -e "$root/out-kiro-again/sqlite3.calls" ]]; then fail "kiro: the login is copied again"; else ok "kiro: the login is copied only once"; fi
+login_first() {  # login_first <case>: the run is wrapped in the login check
+  grep -qxF -- kiro-login "$root/out-$1/run.args" && grep -qF 'login --use-device-flow' "$root/out-$1/run.args"
+}
+if login_first kiro; then fail "kiro: a headless chat is wrapped in the login check"; else ok "kiro: a headless chat doesn't log in by itself"; fi
+SANDBOX_TEST_TTY=1 sandbox_agent=kiro run_case kirologin chat --resume
+if login_first kirologin \
+  && awk 'f { printf "%s ", $0 } $0 == "kiro-login" { f = 1 }' "$root/out-kirologin/run.args" \
+    | grep -qxF "/nix/store/fake-kiro/bin/kiro-cli chat --trust-all-tools --resume "; then
+  ok "kiro: a chat in a terminal logs in first, then runs the chat"
+else
+  fail "kiro: login first: $(tail -n 12 "$root/out-kirologin/run.args")"
+fi
+SANDBOX_TEST_TTY=1 sandbox_agent=kiro run_case kirologin-none
+if login_first kirologin-none; then ok "kiro: no arguments (a chat) logs in first too"; else fail "kiro: no login check without arguments"; fi
+SANDBOX_TEST_TTY=1 sandbox_agent=kiro run_case kirologin-sub whoami
+if login_first kirologin-sub; then fail "kiro: a subcommand is wrapped in the login check"; else ok "kiro: other subcommands don't log in by themselves"; fi
+SANDBOX_TEST_TTY=1 run_case kirologin-claude
+if grep -qxF -- kiro-login "$root/out-kirologin-claude/run.args"; then fail "claude: wrapped in kiro's login check"; else ok "claude: no kiro login check"; fi
+# the check itself, run with a fake kiro-cli: logged out it logs in, then
+# execs the chat; logged in it goes straight to the chat; a failed login
+# stops there
+fake_kiro="$root/fake-kiro-cli"
+cat > "$fake_kiro" <<'FAKE'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE_KIRO_CALLS"
+case "$1" in
+  whoami) [[ -e "$FAKE_KIRO_LOGGED_IN" ]] ;;
+  login) [[ "${FAKE_KIRO_LOGIN_FAILS:-0}" == 1 ]] && exit 3; touch "$FAKE_KIRO_LOGGED_IN" ;;
+esac
+FAKE
+chmod +x "$fake_kiro"
+login_script="$(awk 'p == 2 && $0 == "kiro-login" { exit } p == 2 { print } p == 1 && $0 == "-c" { p = 2 } $0 == "/nix/store/fake-setup" { p = 1 }' "$root/out-kirologin/run.args")"
+login_check() {  # login_check <calls file>: run the check around a chat
+  FAKE_KIRO_CALLS="$1" bash -c "$login_script" kiro-login "$fake_kiro" chat --x
+}
+export FAKE_KIRO_LOGGED_IN="$root/fake-kiro-logged-in"
+rm -f "$FAKE_KIRO_LOGGED_IN"
+login_check "$root/kiro-calls-out" 2>/dev/null
+if [[ "$(tr '\n' '|' < "$root/kiro-calls-out")" == "whoami|login --use-device-flow|chat --x|" ]]; then
+  ok "kiro login check: logged out, it logs in and then starts the chat"
+else
+  fail "kiro login check (logged out): $(cat "$root/kiro-calls-out" 2>&1)"
+fi
+login_check "$root/kiro-calls-in" 2>/dev/null
+if [[ "$(tr '\n' '|' < "$root/kiro-calls-in")" == "whoami|chat --x|" ]]; then
+  ok "kiro login check: logged in, the chat starts directly"
+else
+  fail "kiro login check (logged in): $(cat "$root/kiro-calls-in" 2>&1)"
+fi
+rm -f "$FAKE_KIRO_LOGGED_IN"
+if FAKE_KIRO_LOGIN_FAILS=1 login_check "$root/kiro-calls-fail" 2>/dev/null; then
+  fail "kiro login check: a failed login still exits 0"
+elif [[ "$(tr '\n' '|' < "$root/kiro-calls-fail")" == "whoami|login --use-device-flow|" ]]; then
+  ok "kiro login check: a failed login doesn't start the chat"
+else
+  fail "kiro login check (login fails): $(cat "$root/kiro-calls-fail" 2>&1)"
+fi
+unset FAKE_KIRO_LOGGED_IN
 # K3. SANDBOX_ADD_DIRS mounts read-write (with the clones' git
 # protection) and SANDBOX_RO_PATHS read-only, added to the configured
 # paths; an old agent-named setting gets a warning
@@ -723,10 +782,10 @@ assert_mount profkiro "$ph/.sandbox/data:$home/.local/share/kiro-cli:rw" "profil
 assert_mount profkiro "$ph/agents:$home/.kiro/agents:ro" "profile kiro: the profile's agents, read-only"
 assert_no_mount profkiro "$home/.kiro/skills:$home/.kiro/skills:ro" "profile kiro: ~/.kiro isn't used"
 if jq -e '.mcpServers.mine' "$root/out-profkiro/kiro-settings.copy/mcp.json" >/dev/null 2>&1 \
-  && grep -qF "$ph/.data/kiro-cli/data.sqlite3 .backup '$ph/.sandbox/data/data.sqlite3'" "$root/out-profkiro/sqlite3.calls"; then
-  ok "profile kiro: the profile's MCP servers and login are used"
+  && [[ ! -e "$ph/.sandbox/data/data.sqlite3" ]]; then
+  ok "profile kiro: the profile's MCP servers are used, its open login isn't copied"
 else
-  fail "profile kiro: $(cat "$root/out-profkiro/sqlite3.calls" 2>&1)"
+  fail "profile kiro: $(ls "$ph/.sandbox/data" 2>&1)"
 fi
 
 if (( failures > 0 )); then

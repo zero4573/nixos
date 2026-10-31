@@ -32,13 +32,15 @@ _: {
   #  skills, steering, hooks and powers mounted read-only on top and a
   #  throwaway copy of ~/.kiro/settings (its mcp.json merged with
   #  sandbox-proxy's servers and programs.kiroSandbox.extraMcpServers). The
-  #  first launch copies the host login (data.sqlite3) in. Sessions,
+  #  login is the sandbox's own: a chat runs `kiro-cli login
+  #  --use-device-flow` first when it isn't logged in. Sessions,
   #  history and trust given in the sandbox stay in the sandbox.
   #  There are no Claude-style path deny rules: what is read-write is the
   #  current directory and SANDBOX_ADD_DIRS.
   #
   #  kiro-cli comes from the flake's nixpkgs (kiro-cli-unwrapped in the
-  #  container: the Debian image runs the bun it extracts as is), so it moves
+  #  container: the Debian image runs the bun it extracts as is; its glibc
+  #  added to the binaries' RUNPATH, see kiroCliContainer), so it moves
   #  with `nix flake update`; see UPDATES.md.
   flake.homeModules.kiroSandbox = { pkgs, lib, config, ... }:
   let
@@ -52,6 +54,18 @@ _: {
       name = "kiro-sandbox-dev-tools";
       paths = shared.baseDevTools ++ cfg.lspPackages ++ cfg.extraPackages;
     };
+
+    # kiro-cli-unwrapped for the container. Its loader is nixpkgs' glibc, but
+    # its RUNPATH has no glibc, so libc.so.6 comes from the ld.so cache, and
+    # nixpkgs' glibc reads /etc/ld.so.cache (its etc/ld.so.cache links
+    # there). In the Debian image that cache lists Debian's glibc: the Nix
+    # loader with Debian's libc segfaults before main (exit 139). RUNPATH is
+    # searched before the cache, so add the loader's own glibc to it
+    # (autoPatchelfHook's appendRunpaths: the hook runs after postFixup and
+    # sets RUNPATH itself).
+    kiroCliContainer = pkgs.kiro-cli-unwrapped.overrideAttrs (old: {
+      appendRunpaths = (old.appendRunpaths or [ ]) ++ [ "${pkgs.stdenv.cc.libc}/lib" ];
+    });
 
     extraMcpConfig = lib.optionalString (cfg.extraMcpServers != { })
       (toString (pkgs.writeText "kiro-sandbox-extra-mcp.json"
@@ -83,9 +97,8 @@ _: {
         "programs.kiroSandbox.readOnlyPaths: no entry may contain ':'";
       pkgs.writeShellApplication {
         inherit name;
-        # sqlite copies the host login into the sandbox's data dir; find and
-        # grep read kiro's usage records for herdr (kiro_usage)
-        runtimeInputs = shared.launcherInputs ++ [ pkgs.sqlite pkgs.findutils pkgs.gnugrep ];
+        # find and grep read kiro's usage records for herdr (kiro_usage)
+        runtimeInputs = shared.launcherInputs ++ [ pkgs.findutils pkgs.gnugrep ];
         text = ''
           export SANDBOX_AGENT=kiro
           export SANDBOX_AS=${name}
@@ -110,9 +123,9 @@ _: {
     options.programs.kiroSandbox = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = pkgs.kiro-cli-unwrapped;
-        defaultText = lib.literalExpression "pkgs.kiro-cli-unwrapped";
-        description = "kiro-cli run inside the sandbox (kiro, kiro-sandbox). Unwrapped: the container's Debian userland runs the generic-glibc runtimes kiro-cli extracts.";
+        default = kiroCliContainer;
+        defaultText = lib.literalMD "`pkgs.kiro-cli-unwrapped` with its glibc added to the binaries' RUNPATH";
+        description = "kiro-cli run inside the sandbox (kiro, kiro-sandbox). Unwrapped: the container's Debian userland runs the generic-glibc runtimes kiro-cli extracts. Its binaries must find their own glibc through RUNPATH: otherwise they load the Debian image's libc and segfault.";
       };
 
       openPackage = lib.mkOption {

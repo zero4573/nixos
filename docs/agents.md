@@ -64,12 +64,13 @@ A `tix` run without a terminal (none that start sessions) needs the default set.
 |---|---|---|
 | config | the home is `CLAUDE_CONFIG_DIR` (with its `.claude.json`) | the home is `KIRO_HOME` |
 | login | in the home | `<home>/.data/kiro-cli` (`kiro-open` sets `XDG_DATA_HOME=<home>/.data`, which the tools a session runs see too) |
-| sandbox | the home is mounted read-write as `~/.claude` is; `settings.json`, `skills`, `agents` read-only | its own state in `<home>/.sandbox/{kiro,data}`; the home's agents, skills, steering, hooks and powers read-only; its login copied in once |
+| sandbox | the home is mounted read-write as `~/.claude` is; `settings.json`, `skills`, `agents` read-only | its own state and login in `<home>/.sandbox/{kiro,data}` (a chat logs in there by itself); the home's agents, skills, steering, hooks and powers read-only |
 | started from | copies of `~/.claude`'s `settings.json`, `CLAUDE.md`, `skills`, `agents` (Nix refreshes `settings.json`, `skills` and `agents` of every marked home at each switch, `claude-code.nix`) | links to `~/.kiro`'s agents, skills, steering, hooks, powers; a copy of its `cli.json` and `mcp.json` |
 
 A home made by `agent-configure` is private (mode 700) and has a
 `.agent-profile` marker. Log in once per profile: `AGENT=<profile> agent-open`
-then `/login` for claude, `AGENT=<profile> agent-open login` for kiro.
+then `/login` for claude, `AGENT=<profile> agent-open login` for kiro. A kiro
+profile's sandbox has a login of its own, which its first chat asks for.
 
 A claude profile's `.claude.json` starts past Claude's first-run screens:
 when it's missing, empty or `{}`, the wrappers write

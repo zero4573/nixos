@@ -35,8 +35,7 @@ flowchart LR
     subgraph host["host"]
         hk["~/.kiro: agents, skills, steering, hooks, powers"]
         hs["~/.kiro/settings"]
-        hd["~/.local/share/kiro-cli/data.sqlite3"]
-        st["~/.local/share/kiro-sandbox/{kiro,data}"]
+        st["~/.local/share/kiro-sandbox/{kiro,data} (incl. the sandbox's login)"]
     end
     subgraph c["container"]
         ck["~/.kiro"]
@@ -47,7 +46,6 @@ flowchart LR
     st -->|"read-write"| cd
     hk -->|"read-only"| ck
     hs -->|"copied at launch, mcp.json merged"| cs
-    hd -->|"copied once"| st
 ```
 
 - **Own state.** The host's `~/.kiro` is never writable in the sandbox. kiro keeps
@@ -59,10 +57,13 @@ flowchart LR
 - **Own runtimes.** kiro-cli extracts the runtimes it executes (bun, node, the
   agent server under `kas/`) into its data dir. With a separate data dir, a
   session can't replace what the host runs.
-- **Login.** The first launch copies the host login in (`sqlite3 .backup` of
-  `data.sqlite3`, minus conversations and the records of extracted runtimes). If
-  the sandbox's login expires, run `kiro login --use-device-flow`. To copy the host
-  login again, delete `~/.local/share/kiro-sandbox/data/data.sqlite3`.
+- **Login.** The sandbox has its own login, in its data dir's `data.sqlite3`; the
+  host's is never copied in or read. An interactive chat (`kiro`, `kiro chat ...`)
+  first runs `kiro-cli whoami` in the container and, when the sandbox isn't
+  logged in (or the token can't be refreshed), `kiro-cli login --use-device-flow`:
+  open the URL it prints in the host's browser and enter the code, and the chat
+  starts once the login succeeds. The login is kept for later sessions. Other
+  subcommands and headless runs (no terminal) don't log in by themselves.
 - **Host config, read-only.** `~/.kiro/{agents,skills,steering,hooks,powers}` are
   mounted read-only when they exist. `~/.kiro/settings` is a throwaway copy, so
   settings changed in a session are dropped at exit. Its `mcp.json` is the host's
@@ -77,9 +78,9 @@ flowchart LR
   old `KIRO_SANDBOX_*` names are no longer read and get a warning.
 - **Accounts.** With an agent profile (`AGENT=<profile>`, [agents](./agents.md))
   the profile's home replaces `~/.kiro` as the source of the read-only config
-  and settings, its login is copied from `<home>/.data/kiro-cli`, and the
-  sandbox's own state is `<home>/.sandbox/{kiro,data}` (herdr's usage rows read
-  it there).
+  and settings, and the sandbox's own state (and login) is
+  `<home>/.sandbox/{kiro,data}` (herdr's usage rows read it there); the
+  login `kiro-open` keeps in `<home>/.data/kiro-cli` isn't used.
 - **Every tool trusted.** A chat (`kiro`, or `kiro chat ...`) runs
   `kiro-cli chat --trust-all-tools ...`, the counterpart of claude-sandbox's
   managed allow rules: the container is the boundary, and git-ssh-broker still
@@ -121,6 +122,7 @@ Both come from the flake's nixpkgs; see [`UPDATES.md`](../UPDATES.md).
 
 The kiro cases are in `modules/apps/claude/claude-sandbox-test.sh` (part of the
 `claude-sandbox` flake check). They cover the state and settings mounts, the
-merged `mcp.json`, copying the login once, `SANDBOX_ADD_DIRS` and
+merged `mcp.json`, logging in before an interactive chat (and not otherwise),
+`SANDBOX_ADD_DIRS` and
 `SANDBOX_RO_PATHS`, trusting all tools in chats (and
 `SANDBOX_TRUST_ALL=0`), herdr's usage rows, and `--help`.
