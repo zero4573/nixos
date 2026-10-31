@@ -9,6 +9,7 @@ Keep this list current whenever you add a pin, override, image or download.
 | Component | Pinned | Where | How to update |
 |---|---|---|---|
 | claude-code | nixpkgs' version at `flake.lock` | `programs.claudeSandbox.package` (default `pkgs.claude-code`, `modules/apps/claude/claude-sandbox.nix`), used by `claude` (sandboxed), `claude-sandbox` and `claude-open` | Moves with `nix flake update nixpkgs` plus a switch; check it with `nix eval --raw nixpkgs#claude-code.version`. Launches no longer evaluate or download anything. To run ahead of nixpkgs, set the option to an overridden package. |
+| kiro-cli | nixpkgs' version at `flake.lock` | `programs.kiroSandbox.package` (default `pkgs.kiro-cli-unwrapped`, in the container) and `programs.kiroSandbox.openPackage` (default `pkgs.kiro-cli`, for `kiro-open`), `modules/apps/kiro/kiro-sandbox.nix` | Moves with `nix flake update nixpkgs` plus a switch; check it with `nix eval --raw nixpkgs#kiro-cli-unwrapped.version`. nixpkgs trails upstream (the installer's self-updating `~/.local/bin/kiro-cli` is separate and untouched). To run ahead, override the package's `version` and `src` hash. After a bump, check a sandboxed kiro chat in herdr still shows its `ctx`/credits rows: they read kiro's undocumented session records (`kiro_usage` in `claude-sandbox.sh`) and turn into a red `usage ERROR` when those change. |
 | proton-drive-cli | 0.8.0 | `pkgs/proton-drive-cli/default.nix` (`version`, sha512 `hash`) | Set the new version, put a dummy hash, build, copy the hash from the error. |
 | asdf-vm override | 0.20.2 | `hosts/common.nix` overlay | Workaround: nixpkgs' 0.20.1 tag was deleted upstream. **Remove the override** once nixpkgs ships asdf-vm ≥ 0.20.2. |
 | xwayland-satellite override | 0.8.1 | `hosts/common.nix` overlay | Workaround: 0.8.2 broke Steam popups under niri (Supreeeme/xwayland-satellite#468, #503). **Remove the override** once nixpkgs has a release with the fix. |
@@ -29,7 +30,7 @@ and replace both the tag and the digest.
 | `docker.io/library/caddy` | 2.11.6 | `modules/apps/sandbox-proxy/sandbox-proxy.sh` (`CADDY_IMAGE`) | registry-proxy and mcp-proxy. Images are part of sandbox-proxy's container fingerprint (the script is hashed), so the next `sandbox-proxy start` (any claude-sandbox launch) recreates them. |
 | `docker.io/library/registry` | 2.8.3 | same file (`REGISTRY_IMAGE`) | The pull-through image cache. `registry:3` exists; a major bump needs a config check. |
 | `docker.io/verdaccio/verdaccio` | 5.33.0 | same file (`VERDACCIO_IMAGE`) | The npm cache. 6.x exists (6.5.2); a major bump needs its config checked. |
-| `docker.io/library/debian` | trixie-20260918-slim (Debian 13.7) | `programs.claudeSandbox.image` (`modules/apps/claude/claude-sandbox.nix`); `DEBIAN_IMAGE` in `sandbox-proxy.sh` (`prune`) | The container Claude runs in; it brings nothing but a base system, since tools come from `/nix/store`. Keep both copies on the same digest so only one is stored. |
+| `docker.io/library/debian` | trixie-20260918-slim (Debian 13.7) | `programs.claudeSandbox.image` (`modules/apps/claude/claude-sandbox.nix`); `DEBIAN_IMAGE` in `sandbox-proxy.sh` (`prune`) | The container Claude and kiro run in (kiro-sandbox uses the same option); it brings nothing but a base system, since tools come from `/nix/store`. Keep both copies on the same digest so only one is stored. |
 
 ## Floating: updated outside Nix entirely
 
@@ -42,7 +43,7 @@ and replace both the tag and the digest.
 
 ## Not independent (listed so they aren't mistaken for pins)
 
-- `claude-tickets` (ticket workflow, Obsidian vault setup) is a flake input, locked in `flake.lock` like the others: `nix flake update claude-tickets`. Bump it after pushing there. Its own pins (Obsidian plugins) are in its `UPDATES.md`.
+- `tix` (ticket workflow, Obsidian vault setup) is a flake input, locked in `flake.lock` like the others: `nix flake update tix`. Bump it after pushing there. Its own pins (Obsidian plugins) are in its `UPDATES.md`.
 - `mouse-debounce` is source in this repo (`modules/hardware/mouse-debounce/src`), with no upstream.
 
 ## Removed
@@ -59,6 +60,7 @@ and replace both the tag and the digest.
 nix eval --raw nixpkgs#asdf-vm.version; echo                       # drop override when >= 0.20.2
 nix eval --raw nixpkgs#xwayland-satellite.version; echo            # drop override when fixed
 nix eval --raw nixpkgs#claude-code.version; echo                   # claude-code you get after a flake update
+nix eval --raw nixpkgs#kiro-cli-unwrapped.version; echo            # kiro-cli you get after a flake update
 # newest tags of the pinned images (then crane digest <image>:<tag>)
 for i in library/caddy library/registry verdaccio/verdaccio library/debian; do
   echo "$i: $(nix shell nixpkgs#crane -c crane ls docker.io/$i | grep -E '^[0-9]+(\.[0-9]+)+(-slim(-trixie)?)?$|^trixie-[0-9]+-slim$' | sort -V | tail -n 2 | tr '\n' ' ')"

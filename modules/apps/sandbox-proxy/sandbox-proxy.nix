@@ -41,7 +41,7 @@ _: {
   #          (Bitbucket stays read-only: code goes through git-ssh-broker,
   #          which refuses force pushes and deletes). Optionally add
   #          write:jira:agent-interface so sessions can create tickets
-  #          (claude-tickets asks you to confirm the source and contents
+  #          (tix asks you to confirm the source and contents
   #          first); without it Jira stays read-only. (Rovo hides the tools
   #          a token has no scope for, an unscoped legacy token only gets
   #          Teamwork Graph tools, and
@@ -55,9 +55,9 @@ _: {
   #       3. sandbox-proxy mcp add atlassian --url https://mcp.atlassian.com/v2/mcp --op-item mcp.atlassian.com
   #          (basic auth: base64 email:token, what Rovo expects for personal
   #          tokens; bearer is for service-account keys). The ticket
-  #          workflow (claude-tickets, modules/apps/claude-tickets.nix) uses
+  #          workflow (tix, modules/apps/tix.nix) uses
   #          it as the `jira` source: sessions get it from the sandbox, and
-  #          `ct sync` from `sandbox-proxy host-mcp-config` on 127.0.0.1.
+  #          `tix sync` from `sandbox-proxy host-mcp-config` on 127.0.0.1.
   #
   # `sandbox-proxy start` (called by every sandbox launch) brings up whatever
   # is configured. All sandboxes share one set of proxy containers, so `start`

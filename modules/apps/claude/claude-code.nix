@@ -83,8 +83,8 @@ _: {
       # In claude-sandbox herdr is out of reach: the fields go, one per
       # line, to a file in a directory from the host, and the launcher in
       # the herdr pane reports them (claude-sandbox.sh)
-      if [[ -n "''${CLAUDE_SANDBOX_HERDR_DIR:-}" ]]; then
-        out="$CLAUDE_SANDBOX_HERDR_DIR/usage"
+      if [[ -n "''${SANDBOX_HERDR_DIR:-}" ]]; then
+        out="$SANDBOX_HERDR_DIR/usage"
         for i in {0..9}; do printf '%s\n' "''${fields[i]:-}"; done >"$out.tmp" \
           && mv -f "$out.tmp" "$out"
         exit 0
@@ -111,24 +111,24 @@ _: {
       # Claude Code's own terminal notifications (bell / OSC) off: herdr
       # notifies (modules/apps/herdr/herdr.nix)
       preferredNotifChannel = "notifications_disabled";
-      # claude-tickets' hooks desktop-notify (sticky, until dismissed) when a
+      # tix' hooks desktop-notify (sticky, until dismissed) when a
       # ticket session needs you; herdr already does, so theirs are off
-      env.CLAUDE_TICKETS_NOTIFY = "0";
+      env.TIX_NOTIFY = "0";
       # The LSP tool, served by claude-sandbox.nix's lspServers plugin (the
       # `lsp` skill says when to use it)
       env.ENABLE_LSP_TOOL = "1";
       statusLine = { type = "command"; command = "${statusLineScript}"; refreshInterval = 60; };
       autoUpdate = false;
       # Transcripts are what `claude --continue` resumes (e.g. a ticket
-      # session restarted by `ct start`); keep them longer than the 30-day
+      # session restarted by `tix start`); keep them longer than the 30-day
       # default
       cleanupPeriodDays = 90;
       systemPrompt = "if AGENTS.md exists, read it as CLAUDE.md.  Ensure that both AGENTS.md, and README.md (if it exists), are always kept up to date when a prompt changes a project";
-      # Ticket and spec sessions (the lead and its tickets:task,
-      # tickets:mechanical, tickets:reviewer and tickets:reviewer-deep
+      # Ticket and spec sessions (the lead and its tix:task,
+      # tix:mechanical, tix:reviewer and tix:reviewer-deep
       # subagents) add stricter rules (no reset --hard, branch -D, clean or
-      # `ct ws rm`, ...) in their own .claude/settings.json
-      # (modules/apps/claude-tickets.nix).
+      # `tix ws rm`, ...) in their own .claude/settings.json
+      # (modules/apps/tix.nix).
       permissions = {
         deny = [
           "Bash(rm -rf:*)"
@@ -214,40 +214,64 @@ _: {
       in
       if s.only == null then
         ''
-          run cp -r ${root}/. "$HOME/.claude/skills/"
+          run cp -r ${root}/. "$h/skills/"
         ''
       else
         lib.concatMapStrings (name: ''
-          run cp -r ${root}/${name} "$HOME/.claude/skills/${name}"
+          run cp -r ${root}/${name} "$h/skills/${name}"
         '') s.only
     ) skillSources;
+
+    # The Claude config dirs Nix keeps current: ~/.claude, and every claude
+    # profile home agent-configure made (modules/apps/agents: listed in
+    # ~/.config/agents/profiles.json and marked with .agent-profile), so
+    # AGENT=<profile> sessions get the same settings, skills and agents
+    claudeHomes = ''
+      claude_homes=("$HOME/.claude")
+      profiles="''${XDG_CONFIG_HOME:-$HOME/.config}/agents/profiles.json"
+      if [[ -f "$profiles" ]]; then
+        while IFS= read -r h; do
+          case "$h" in "~"|"~/"*) h="$HOME''${h#\~}" ;; esac
+          [[ "$h" == /* && "$h" != "$HOME/.claude" && -f "$h/.agent-profile" ]] && claude_homes+=("$h")
+        done < <(${lib.getExe pkgs.jq} -r '.profiles // {} | .[] | select(.agent? == "claude") | .home? // empty | strings' "$profiles" 2>/dev/null || true)
+      fi
+    '';
   in {
-    # notify-send on PATH for ct's notification hook (and herdr's)
+    # notify-send on PATH for tix's notification hook (and herdr's)
     home.packages = [ pkgs.libnotify ];
 
     home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      mkdir -p "$HOME/.claude"
-      run install -m 0644 ${settingsFile} "$HOME/.claude/settings.json"
+      ${claudeHomes}
+      for h in "''${claude_homes[@]}"; do
+        mkdir -p "$h"
+        run install -m 0644 ${settingsFile} "$h/settings.json"
+      done
     '';
 
-    # ~/.claude/skills is fully Nix-owned: wiped and repopulated from
+    # <home>/skills is fully Nix-owned: wiped and repopulated from
     # skillsSource + skillSources on every switch
     home.activation.claudeCodeSkills = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      run rm -rf "$HOME/.claude/skills"
-      run mkdir -p "$HOME/.claude/skills"
-      run cp -r ${skillsSource}/. "$HOME/.claude/skills/"
-      ${skillCopyCommands}
-      run chmod -R u+rwX "$HOME/.claude/skills"
+      ${claudeHomes}
+      for h in "''${claude_homes[@]}"; do
+        run rm -rf "$h/skills"
+        run mkdir -p "$h/skills"
+        run cp -r ${skillsSource}/. "$h/skills/"
+        ${skillCopyCommands}
+        run chmod -R u+rwX "$h/skills"
+      done
     '';
 
-    # ~/.claude/agents is fully Nix-owned: wiped and repopulated from
+    # <home>/agents is fully Nix-owned: wiped and repopulated from
     # agentsSource on every switch
     home.activation.claudeCodeAgents = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      run rm -rf "$HOME/.claude/agents"
-      run mkdir -p "$HOME/.claude/agents"
-      run cp -r ${agentsSource}/. "$HOME/.claude/agents/"
-      run rm -f "$HOME/.claude/agents/README.md"
-      run chmod -R u+rwX "$HOME/.claude/agents"
+      ${claudeHomes}
+      for h in "''${claude_homes[@]}"; do
+        run rm -rf "$h/agents"
+        run mkdir -p "$h/agents"
+        run cp -r ${agentsSource}/. "$h/agents/"
+        run rm -f "$h/agents/README.md"
+        run chmod -R u+rwX "$h/agents"
+      done
     '';
   };
 }

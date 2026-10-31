@@ -1,8 +1,26 @@
+# The agent this launcher runs, set by its Nix wrapper: claude (Claude Code,
+# claude-sandbox.nix) or kiro (kiro-cli, modules/apps/kiro/kiro-sandbox.nix).
+# Mounts, git protection, proxies, git-ssh-broker, nix daemon, .tool-versions
+# and the pod are shared; the agent's own arguments, config, login state and
+# MCP wiring differ (see the "agent" blocks below).
+agent="${SANDBOX_AGENT:-claude}"
+case "$agent" in
+  claude|kiro) ;;
+  *) echo "claude-sandbox: unknown SANDBOX_AGENT '$agent' (claude or kiro)" >&2; exit 1 ;;
+esac
+sandbox_name="$agent-sandbox"
+# The sandbox's settings are SANDBOX_* variables, the same for every agent
+# (SANDBOX_ADD_DIRS, SANDBOX_RO_PATHS, ...: see --help). The agent-named ones
+# they replace are no longer read; one still set gets a warning
+for old in $(compgen -e | grep -E '^(CLAUDE|KIRO)_SANDBOX_(PORTS|NAME|QUIET|PASS_ENV|RO_PATHS|NIX_DAEMON|ADD_DIRS|TRUST_ALL)$' || true); do
+  echo "$sandbox_name: $old is no longer read; use ${old#*_}" >&2
+done
+
 # Launch log: every step is timestamped (seconds since launch) on stderr --
 # --quiet keeps only warnings there -- and always appended to
-# ~/.local/state/claude-sandbox.log, so a launch that hangs shows which step
+# ~/.local/state/<agent>-sandbox.log, so a launch that hangs shows which step
 # it's stuck in (tail -f that file from another terminal)
-launch_log="${XDG_STATE_HOME:-$HOME/.local/state}/claude-sandbox.log"
+launch_log="${XDG_STATE_HOME:-$HOME/.local/state}/$sandbox_name.log"
 mkdir -p "$(dirname "$launch_log")"
 if [[ "$(stat -c %s "$launch_log" 2>/dev/null || echo 0)" -gt 5242880 ]]; then
   tail -c 1048576 "$launch_log" > "$launch_log.tmp" && mv "$launch_log.tmp" "$launch_log"
@@ -13,7 +31,7 @@ log_line() {
   local now ms
   now="${EPOCHREALTIME//[.,]/}"
   ms=$(( (now - launch_start) / 1000 ))
-  printf 'claude-sandbox [%d.%ds] %s\n' $((ms / 1000)) $(((ms % 1000) / 100)) "$1"
+  printf '%s [%d.%ds] %s\n' "$sandbox_name" $((ms / 1000)) $(((ms % 1000) / 100)) "$1"
   printf '%s [%s] %s\n' "$(date -Iseconds)" "${pod_name:-pid $$}" "$1" >> "$launch_log" 2>/dev/null || true
 }
 log() {
@@ -28,18 +46,72 @@ warn() {
 }
 
 
-# Every argument belongs to claude and is passed through untouched; the
-# sandbox only reads the ones that say what the session may touch (see
-# "Mounts" below). Settings of the sandbox itself come from the environment:
-#   CLAUDE_SANDBOX_PORTS        comma-separated ports to publish on the same
-#                               host port, e.g. 3000,5173
-#   CLAUDE_SANDBOX_NAME         pod label instead of <repo>-<folder>
-#   CLAUDE_SANDBOX_QUIET=1      only warnings while launching
-#   CLAUDE_SANDBOX_PASS_ENV     space-separated globs of host environment
-#                               variables to pass in, e.g. "CLAUDE_TICKETS_*"
-#   CLAUDE_SANDBOX_RO_PATHS     colon-separated host paths to mount read-only
-#                               in every session (~ and $HOME expanded)
-if [[ "${CLAUDE_SANDBOX_AS:-}" == claude-sandbox && "${1:-}" =~ ^(-h|--help)$ ]]; then
+# Every argument belongs to the agent and is passed through (kiro chats get
+# --trust-all-tools, below); the sandbox only reads the ones that say what
+# the session may touch (see "Mounts" below). Settings of the sandbox itself
+# come from the environment, SANDBOX_* for every agent (the --help texts
+# list them): SANDBOX_PORTS, SANDBOX_NAME, SANDBOX_QUIET, SANDBOX_PASS_ENV,
+# SANDBOX_ADD_DIRS, SANDBOX_RO_PATHS, SANDBOX_NIX_DAEMON, SANDBOX_TRUST_ALL
+if [[ "${SANDBOX_AS:-}" == kiro-sandbox && "${1:-}" =~ ^(-h|--help)$ ]]; then
+  cat <<'EOF'
+Usage: kiro [kiro-cli args...]        (kiro-sandbox is the same command)
+
+Runs kiro-cli inside a sandboxed, privileged rootless podman container,
+scoped to the current directory. The arguments are kiro-cli's own and are
+passed through (`kiro chat --help` lists them; no arguments starts a chat);
+kiro-open runs the unsandboxed CLI.
+
+Chats trust every tool: no arguments or `chat ...` runs
+`kiro-cli chat --trust-all-tools ...`, as the container is the boundary (git
+pushes still go through git-ssh-broker, which refuses force pushes and
+deletes). A trust flag of your own (-a, --trust-all-tools, --trust-tools=...)
+is left as given, and SANDBOX_TRUST_ALL=0 keeps kiro's prompts.
+
+What the session can see and change:
+  * read-write: the current directory and every SANDBOX_ADD_DIRS
+    directory
+  * read-only: programs.kiroSandbox.readOnlyPaths and SANDBOX_RO_PATHS,
+    /nix/store, the asdf data dir, any vault's .obsidian/, and in every
+    clone under a read-write directory .git/config and .git/hooks (as in
+    claude-sandbox)
+  * kiro's own state is the sandbox's, not the host's: ~/.kiro and
+    ~/.local/share/kiro-cli are ~/.local/share/kiro-sandbox/{kiro,data},
+    so sessions, workspace trust and "always allow" rules given in the
+    sandbox stay in the sandbox and never reach kiro-open. The first launch
+    copies your host login (data.sqlite3) in; if it expires, run
+    `kiro login --use-device-flow`
+  * from the host, read-only: ~/.kiro/{agents,skills,steering,hooks,powers}
+    and a throwaway copy of ~/.kiro/settings, whose mcp.json is the host's
+    servers plus sandbox-proxy's and programs.kiroSandbox.extraMcpServers;
+    settings changed in a session are dropped at exit
+  * the CA bundle, the host nix-daemon (untrusted users only), git over SSH
+    and commit signing through git-ssh-broker, sandbox-proxy's registries,
+    and ~/.tool-versions work as in claude-sandbox (claude-sandbox --help)
+  * the language servers of kiro's code tool (/code init) are on PATH
+    (programs.kiroSandbox.lspPackages)
+
+Sandbox settings (environment; the same SANDBOX_* for claude-sandbox):
+  SANDBOX_PORTS=3000,5173   publish ports on the same host ports
+  SANDBOX_NAME=<label>      pod kiro-sandbox-<label>
+  SANDBOX_QUIET=1           only print warnings while launching
+  SANDBOX_PASS_ENV="A_* B"  more host variables to pass in (name globs,
+                            added to programs.kiroSandbox.passEnv)
+  SANDBOX_ADD_DIRS=/a:~/b   more directories mounted read-write (mounts
+                            only; tix sets it for the vault's sessions)
+  SANDBOX_RO_PATHS=/a:~/b   more host paths mounted read-only at the same
+                            path (added to the configured list)
+  SANDBOX_NIX_DAEMON=1      mount the nix-daemon socket when its trust
+                            can't be told
+  SANDBOX_TRUST_ALL=0       chats ask before running tools (kiro's
+                            default) instead of trusting them all
+
+If the current directory is a git checkout, it is fetched and fast-forwarded
+to its upstream before launch. Each launch step is logged to
+~/.local/state/kiro-sandbox.log.
+EOF
+  exit 0
+fi
+if [[ "${SANDBOX_AS:-}" == claude-sandbox && "${1:-}" =~ ^(-h|--help)$ ]]; then
   cat <<'EOF'
 Usage: claude [claude args...]        (claude-sandbox is the same command)
 
@@ -49,9 +121,9 @@ passed through untouched (claude --help lists them); claude-open runs the
 unsandboxed CLI.
 
 What the session can see and change follows Claude's own settings:
-  * read-write: the current directory and every --add-dir directory (from
+  * read-write: the current directory, every --add-dir directory (from
     the arguments, and permissions.additionalDirectories in the user,
-    project and --settings settings)
+    project and --settings settings) and every SANDBOX_ADD_DIRS one
   * read-only: the paths of Edit(...) / Write(...) deny rules in those
     settings, when they lie inside a read-write directory; the most
     specific path wins, so a deny inside an --add-dir directory, or an
@@ -80,7 +152,7 @@ What the session can see and change follows Claude's own settings:
     daemon (`nix store info --json`) and skips the mount, with a warning,
     when you are in nix.settings.trusted-users (root-equivalent); if it
     can't tell, it does not mount it either (fails closed) and warns;
-    CLAUDE_SANDBOX_NIX_DAEMON=1 mounts it anyway in that case (a known-
+    SANDBOX_NIX_DAEMON=1 mounts it anyway in that case (a known-
     trusted user never gets it)
   * git over SSH through git-ssh-broker, started on the host for the
     session: fetch and push to GitHub/Bitbucket with your host ssh setup,
@@ -98,20 +170,26 @@ What the session can see and change follows Claude's own settings:
     work in any directory; a .tool-versions nearer the working
     directory wins
 
-Sandbox settings (environment):
-  CLAUDE_SANDBOX_PORTS=3000,5173   publish ports on the same host ports
-  CLAUDE_SANDBOX_NAME=<label>      pod claude-sandbox-<label>
-  CLAUDE_SANDBOX_QUIET=1           only print warnings while launching
-  CLAUDE_SANDBOX_PASS_ENV="A_* B"  host variables to pass in (name globs)
-  CLAUDE_SANDBOX_RO_PATHS=/a:~/b   host paths mounted read-only at the same
-                                   path in every session (programs.
-                                   claudeSandbox.readOnlyPaths); ~ and $HOME
-                                   are expanded, a missing path is skipped,
-                                   and one inside a read-write directory
-                                   stays read-only; one containing the
-                                   project or an --add-dir is skipped with
-                                   a warning. Set in the host env, it
-                                   replaces the configured list
+Sandbox settings (environment; the same SANDBOX_* for kiro-sandbox):
+  SANDBOX_PORTS=3000,5173   publish ports on the same host ports
+  SANDBOX_NAME=<label>      pod claude-sandbox-<label>
+  SANDBOX_QUIET=1           only print warnings while launching
+  SANDBOX_PASS_ENV="A_* B"  more host variables to pass in (name globs,
+                            added to programs.claudeSandbox.passEnv)
+  SANDBOX_ADD_DIRS=/a:~/b   more directories mounted read-write, as
+                            --add-dir's are, but only mounted: Claude
+                            isn't given them (tix sets it for the vault's
+                            sessions)
+  SANDBOX_RO_PATHS=/a:~/b   more host paths mounted read-only at the same
+                            path in every session, added to programs.
+                            claudeSandbox.readOnlyPaths; ~ and $HOME are
+                            expanded and a missing path is skipped. Every
+                            path is mounted once and read-only wins: one
+                            also given read-write (an --add-dir, the
+                            project) is read-only, one around a read-write
+                            directory leaves that directory writable
+  SANDBOX_TRUST_ALL         not used by claude (its container-only managed
+                            settings already allow what the sandbox holds)
 
 If the current directory is a git checkout, it is fetched and fast-forwarded
 to its upstream before launch; diverged branches or local changes in the
@@ -121,18 +199,18 @@ EOF
   exit 0
 fi
 
-[[ "${CLAUDE_SANDBOX_QUIET:-}" == 1 ]] && quiet=1
+[[ "${SANDBOX_QUIET:-}" == 1 ]] && quiet=1
 port_flags=()
-IFS=',' read -ra ports <<< "${CLAUDE_SANDBOX_PORTS:-}"
+IFS=',' read -ra ports <<< "${SANDBOX_PORTS:-}"
 for p in "${ports[@]}"; do
   [[ -n "$p" ]] || continue
   if ! [[ "$p" =~ ^[0-9]+$ ]]; then
-    echo "claude-sandbox: CLAUDE_SANDBOX_PORTS must be a comma-separated list of numbers: $p" >&2
+    echo "$sandbox_name: SANDBOX_PORTS must be a comma-separated list of numbers: $p" >&2
     exit 1
   fi
   port_flags+=(-p "$p:$p")
 done
-name_override="${CLAUDE_SANDBOX_NAME:-}"
+name_override="${SANDBOX_NAME:-}"
 
 # The arguments the sandbox reads (never changes): --add-dir (variadic, like
 # claude's), --settings (a file or a JSON string), --mcp-config (variadic,
@@ -147,7 +225,7 @@ take_list() {  # take_list <array name>: the values after a variadic flag
     into+=("${args[i]}")
   done
 }
-while (( i < ${#args[@]} )); do
+while [[ "$agent" == claude ]] && (( i < ${#args[@]} )); do
   a="${args[i]}"
   case "$a" in
     --) break ;;
@@ -162,6 +240,16 @@ while (( i < ${#args[@]} )); do
   esac
   i=$((i + 1))
 done
+# More read-write directories, for every agent: SANDBOX_ADD_DIRS
+# (colon-separated; ~ expanded below). It is about mounts only: the agent
+# isn't told about them (claude's own --add-dir, read above, adds a
+# directory to its context, and is mounted too, so it exists in the
+# container). A tool that starts sessions (tix) sets it to what the session
+# needs
+IFS=: read -ra env_add_dirs <<< "${SANDBOX_ADD_DIRS:-}"
+for d in "${env_add_dirs[@]}"; do
+  [[ -n "$d" ]] && add_dirs+=("$d")
+done
 project_root="$PWD"
 log "launching in $project_root (log: $launch_log)"
 
@@ -175,7 +263,7 @@ asdf_data_dir="$HOME/.asdf"
 # Where the host's nix-daemon listens (the launcher sets this to the same
 # value; it is an override for the script's test only, not a user setting)
 nix_daemon_socket_dir="$(realpath -m -- "${NIX_DAEMON_SOCKET_DIR:-/nix/var/nix/daemon-socket}")"
-if [[ "$nix_daemon_socket_dir" != /nix/var/nix/* && "${CLAUDE_SANDBOX_TEST:-}" != 1 ]]; then
+if [[ "$nix_daemon_socket_dir" != /nix/var/nix/* && "${SANDBOX_TEST:-}" != 1 ]]; then
   # the directory is bind-mounted read-write: don't take an arbitrary one
   warn "NIX_DAEMON_SOCKET_DIR=$nix_daemon_socket_dir is outside /nix/var/nix/ (only the test may set it): ignoring it"
   nix_daemon_socket_dir=/nix/var/nix/daemon-socket
@@ -205,14 +293,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# claude-code is built with the system (programs.claudeSandbox.package, from
-# the flake's locked nixpkgs), so launching evaluates and downloads nothing
-claude_out="$CLAUDE_CODE"
-log "claude-code: $claude_out"
+# The agent is built with the system (programs.claudeSandbox.package /
+# programs.kiroSandbox.package, from the flake's locked nixpkgs), so
+# launching evaluates and downloads nothing
+if [[ "$agent" == kiro ]]; then
+  agent_out="$KIRO_CLI"
+  agent_cmd=("$agent_out/bin/kiro-cli")
+  log "kiro-cli: $agent_out"
+else
+  agent_out="$CLAUDE_CODE"
+  agent_cmd=("$agent_out/bin/claude")
+  log "claude-code: $agent_out"
 
-# Claude's own auth/session state
-mkdir -p "$HOME/.claude"
-touch "$HOME/.claude.json"
+  # Claude's own auth/session state: ~/.claude and ~/.claude.json, or with
+  # an agent profile (AGENT=<profile>, modules/apps/agents) its home as
+  # CLAUDE_CONFIG_DIR, which holds both
+  if [[ -n "${AGENT_HOME:-}" ]]; then
+    [[ "$AGENT_HOME" == /* ]] || { echo "$sandbox_name: AGENT_HOME must be absolute: $AGENT_HOME" >&2; exit 1; }
+    claude_home="$AGENT_HOME"
+    claude_json="$AGENT_HOME/.claude.json"
+    log "profile ${AGENT_PROFILE:-?}: Claude's config in $claude_home"
+  else
+    claude_home="$HOME/.claude"
+    claude_json="$HOME/.claude.json"
+  fi
+  mkdir -p "$claude_home"
+  touch "$claude_json"
+fi
 
 network_flags=()
 registry_env_flags=()
@@ -298,7 +405,7 @@ fi
 # runs here on the host for this session and its sockets are mounted in. The
 # git socket carries git's transport commands to GitHub/Bitbucket through the
 # host's ssh, refusing force pushes and branch/tag deletes; the agent socket
-# signs git signatures only, with the signing keys (CLAUDE_SANDBOX_SIGNING_KEYS,
+# signs git signatures only, with the signing keys (SANDBOX_SIGNING_KEYS,
 # public halves mounted read-only), through the host's agent (SSH_AUTH_SOCK,
 # else GIT_SSH_BROKER_UPSTREAM_AGENT). No SSH key or agent of the host is
 # ever reachable from the sandbox itself. Without signing keys or an agent,
@@ -313,7 +420,7 @@ if [[ -n "${GIT_SSH_BROKER:-}" ]]; then
   upstream_agent="${SSH_AUTH_SOCK:-${GIT_SSH_BROKER_UPSTREAM_AGENT:-}}"
   upstream_agent="${upstream_agent/#\~/$HOME}"
   signing_keys=()
-  IFS=':' read -ra configured_keys <<< "${CLAUDE_SANDBOX_SIGNING_KEYS:-}"
+  IFS=':' read -ra configured_keys <<< "${SANDBOX_SIGNING_KEYS:-}"
   for k in "${configured_keys[@]}"; do
     k="${k/#\~/$HOME}"
     [[ -n "$k" && -f "$k" ]] && signing_keys+=("$k")
@@ -384,29 +491,30 @@ else
 fi
 # The pod name doubles as its hostname, which is capped at 63 characters
 # (leaving room for a -N suffix)
-name_base="claude-sandbox-$name_base"
+name_base="$sandbox_name-$name_base"
 name_base="${name_base:0:58}"
 name_base="${name_base%[-_.]}"
 
 name_labels=(
-  --label "claude-sandbox.project=$project_root"
-  --label "claude-sandbox.repo=${repo_name:-}"
+  --label "$sandbox_name.project=$project_root"
+  --label "$sandbox_name.repo=${repo_name:-}"
+  --label "$sandbox_name.profile=${AGENT_PROFILE:-}"
 )
 # Pods of sessions that died without cleaning up (killed, terminal closed,
-# reboot) are left behind. Remove the ones whose claude container is gone and
-# that are over 10 minutes old (a new session's pod has no claude container
+# reboot) are left behind. Remove the ones whose agent container is gone and
+# that are over 10 minutes old (a new session's pod has no agent container
 # until the launch gets that far).
 # (podman calls hang when another podman process holds its storage lock, so
 # this is where a stuck podman first shows)
-log "podman: checking for orphaned claude-sandbox pods"
+log "podman: checking for orphaned $sandbox_name pods"
 now="$(date +%s)"
 while read -r old_pod created; do
   [[ -n "$old_pod" && "$created" =~ ^[0-9]+$ ]] || continue
-  [[ "$(podman inspect -f '{{.State.Running}}' "$old_pod-claude" 2>/dev/null)" == true ]] && continue
+  [[ "$(podman inspect -f '{{.State.Running}}' "$old_pod-$agent" 2>/dev/null)" == true ]] && continue
   (( now - created > 600 )) || continue
   podman pod rm -f -t 0 "$old_pod" >/dev/null 2>&1 \
     && log "removed the orphaned pod $old_pod"
-done < <(podman pod ps --filter label=claude-sandbox.project --format '{{.Name}} {{.Created.Unix}}' 2>/dev/null || true)
+done < <(podman pod ps --filter "label=$sandbox_name.project" --format '{{.Name}} {{.Created.Unix}}' 2>/dev/null || true)
 
 # Containers go in aisandbox.slice (modules/apps/ai-sandbox-slice.nix) for
 # its CPU, IO and memory limits; podman only honours that through the pod's
@@ -451,7 +559,7 @@ fi
 # prompt as another config file. claude merges it with any --mcp-config of
 # the caller.
 mcp_flags=()
-if [[ -n "$proxy_mcp_config$extra_mcp_config" ]]; then
+if [[ "$agent" == claude && -n "$proxy_mcp_config$extra_mcp_config" ]]; then
   printf '%s\n' "$proxy_mcp_config" "$extra_mcp_config" \
     | jq -s '{mcpServers: (map(select(. != null) | .mcpServers) | add)}' > "$tmp_dir/mcp.json"
   mounts+=(-v "$tmp_dir/mcp.json:$tmp_dir/mcp.json:ro")
@@ -459,7 +567,7 @@ if [[ -n "$proxy_mcp_config$extra_mcp_config" ]]; then
 fi
 # The language servers' plugin (programs.claudeSandbox.lspServers), a store
 # path the container reaches through the /nix/store mount
-if [[ -n "${CLAUDE_LSP_PLUGIN:-}" ]]; then
+if [[ "$agent" == claude && -n "${CLAUDE_LSP_PLUGIN:-}" ]]; then
   mcp_flags+=(--plugin-dir "$CLAUDE_LSP_PLUGIN")
 fi
 
@@ -480,9 +588,12 @@ add_settings() {
     && settings_sources+=("$1"$'\t'"$json")
   return 0
 }
-add_settings "$HOME/.claude" "$HOME/.claude/settings.json"
-add_settings "$project_root" "$project_root/.claude/settings.json"
-add_settings "$project_root" "$project_root/.claude/settings.local.json"
+# (Claude's settings only: kiro has no path deny rules to follow)
+if [[ "$agent" == claude ]]; then
+  add_settings "$claude_home" "$claude_home/settings.json"
+  add_settings "$project_root" "$project_root/.claude/settings.json"
+  add_settings "$project_root" "$project_root/.claude/settings.local.json"
+fi
 for s in "${settings_args[@]}"; do
   if [[ "$s" == \{* ]]; then
     jq -e . >/dev/null 2>&1 <<< "$s" && settings_sources+=("$project_root"$'\t'"$s")
@@ -513,7 +624,7 @@ for d in "${add_dirs[@]}"; do
   if [[ -d "$d" ]]; then
     rw_paths+=("$(realpath "$d")")
   else
-    warn "--add-dir $d isn't a directory, not mounting it"
+    warn "$d isn't a directory, not mounting it"
   fi
 done
 ro_paths=()
@@ -595,15 +706,17 @@ for p in "${ro_paths[@]}"; do
   fi
 done
 
-# Paths every session may read but not change (CLAUDE_SANDBOX_RO_PATHS, from
-# programs.claudeSandbox.readOnlyPaths), e.g. a model cache: mounted read-only
-# at the same path, also when inside a read-write directory; missing ones are
-# skipped. One equal to or containing a read-write directory (the project
-# included) is skipped with a warning: these are shared caches and never take
-# write access from the project or an --add-dir (W2-nixos-C01); a read-only
-# project comes only from Claude's deny rules, above. Only ~ and $HOME are
-# expanded, not ~user (W1-nixos-C02)
-IFS=: read -ra extra_ro <<< "${CLAUDE_SANDBOX_RO_PATHS:-}"
+# Paths every session may read but not change: the configured ones
+# (SANDBOX_CONFIG_RO_PATHS, set by the Nix wrapper from
+# programs.<agent>Sandbox.readOnlyPaths) plus SANDBOX_RO_PATHS from the
+# environment (e.g. set by tix), e.g. a model cache: mounted read-only at the
+# same path, also when inside a read-write directory; missing ones are
+# skipped. Every path is mounted once: a read-only path that is also given
+# read-write (an --add-dir, SANDBOX_ADD_DIRS, the project) is read-only, and
+# one containing a read-write directory is read-only around it while the
+# more specific read-write directory stays writable (podman stacks mounts by
+# depth). Only ~ and $HOME are expanded, not ~user (W1-nixos-C02)
+IFS=: read -ra extra_ro <<< "${SANDBOX_CONFIG_RO_PATHS:-}:${SANDBOX_RO_PATHS:-}"
 for p in "${extra_ro[@]}"; do
   [[ -n "$p" ]] || continue
   # shellcheck disable=SC2088,SC2016 # literal ~ and $HOME in the rule, expanded by hand
@@ -617,14 +730,17 @@ for p in "${extra_ro[@]}"; do
   fi
   p="$(realpath "$p")" || continue
   [[ -n "$p" ]] || continue
-  skip=
-  for r in "${rw_paths[@]}"; do
-    if [[ "$r" == "$p" || "$r" == "${p%/}"/* ]]; then skip=$r; break; fi
-  done
-  if [[ -n "$skip" ]]; then
-    warn "read-only path $p contains the read-write directory $skip, not mounting it read-only"
+  if [[ "$p" == "$project_abs" ]]; then
+    warn "read-only path $p is the project: mounting the project read-only"
+    project_mode=ro
     continue
   fi
+  [[ "${mount_mode[$p]:-}" == rw ]] && log "mounts: $p is given read-write and read-only: read-only"
+  for r in "$project_abs" "${rw_paths[@]}"; do
+    if [[ "$r" == "${p%/}"/* ]]; then
+      log "mounts: read-only $p contains the read-write $r, which stays read-write"
+    fi
+  done
   mount_mode[$p]=ro
 done
 
@@ -644,7 +760,7 @@ done
 # a warning and its whole .git read-only. Without these, a session could
 # repoint git at a config of its own.
 # Residual risk: a clone made during the session is not covered until the
-# next launch makes its files read-only. ct's host git disables hooks,
+# next launch makes its files read-only. tix's host git disables hooks,
 # fsmonitor and external diff and checks the pointer files, but other config
 # keys (filters, sshCommand, credential helpers) and the user's own git in
 # such a clone are not covered.
@@ -703,7 +819,7 @@ for f in "${path_args[@]}" "${mcp_args[@]}"; do
   [[ "$f" == /* ]] || f="$PWD/$f"
   [[ -e "$f" ]] || continue
   f="$(realpath "$f")"
-  within "$f" "${rw_paths[@]}" /nix/store "$HOME/.claude" || mount_mode[$f]=ro
+  within "$f" "${rw_paths[@]}" /nix/store "${claude_home:-$HOME/.claude}" || mount_mode[$f]=ro
 done
 
 dir_mounts=()
@@ -723,7 +839,7 @@ log "mounts: project $project_mode, ${#rw_dirs[@]} more read-write, $(( ${#mount
 # every plugin under asdf's installs/ that the host file doesn't name
 # (numeric sort per dot part), so a host file that lacks python still gives
 # python3 in any directory. A workspace's own .tool-versions
-# (tool-versions-v1, written by ct) is nearer and wins.
+# (tool-versions-v1, written by tix) is nearer and wins.
 tool_versions_mounts=()
 tv_dest="$HOME/.tool-versions"
 if [[ -n "${mount_mode[$tv_dest]:-}" ]]; then
@@ -774,7 +890,7 @@ fi
 # root on the host. So the daemon is asked first (`nix store info --json`,
 # field `trusted`, with the launcher's own nix) and the mount is skipped when
 # the user is trusted, and when it can't be told (fail closed, with a warning);
-# CLAUDE_SANDBOX_NIX_DAEMON=1 forces the mount for the unknown case.
+# SANDBOX_NIX_DAEMON=1 forces the mount for the unknown case.
 # The host's nix.conf isn't visible in the container, so the CLI features
 # come through NIX_CONFIG.
 nix_mounts=()
@@ -798,13 +914,13 @@ if [[ -d "$nix_daemon_socket_dir" ]]; then
     yes) warn "not mounting the nix-daemon socket: you are a trusted nix user, which would be root on the host" ;;
     no) :  ;;
     *)
-      if [[ "${CLAUDE_SANDBOX_NIX_DAEMON:-}" == 1 ]]; then
-        warn "nix-daemon: couldn't tell if you are a trusted nix user; mounting its socket because CLAUDE_SANDBOX_NIX_DAEMON=1"
+      if [[ "${SANDBOX_NIX_DAEMON:-}" == 1 ]]; then
+        warn "nix-daemon: couldn't tell if you are a trusted nix user; mounting its socket because SANDBOX_NIX_DAEMON=1"
       else
-        warn "not mounting the nix-daemon socket: couldn't tell if you are a trusted nix user; set CLAUDE_SANDBOX_NIX_DAEMON=1 to mount it anyway"
+        warn "not mounting the nix-daemon socket: couldn't tell if you are a trusted nix user; set SANDBOX_NIX_DAEMON=1 to mount it anyway"
       fi ;;
   esac
-  if [[ "$nix_trusted" == no || ( "$nix_trusted" == unknown && "${CLAUDE_SANDBOX_NIX_DAEMON:-}" == 1 ) ]]; then
+  if [[ "$nix_trusted" == no || ( "$nix_trusted" == unknown && "${SANDBOX_NIX_DAEMON:-}" == 1 ) ]]; then
     nix_mounts+=(-v "$nix_daemon_socket_dir:$nix_daemon_socket_dir")
     nix_env_flags+=(-e NIX_REMOTE=daemon -e "NIX_CONFIG=experimental-features = nix-command flakes")
   fi
@@ -816,24 +932,136 @@ fi
 #  * the .obsidian folder of any Obsidian vault mounted writable: community
 #    plugins installed there would run in Obsidian on the host
 protect_mounts=()
-for p in "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/CLAUDE.md"; do
-  [[ -e "$p" ]] && protect_mounts+=(-v "$p:$p:ro")
-done
-# The user settings, minus each deny rule the container's managed settings
-# allow (e.g. rm -rf, denied on the host): a deny wins over an allow at any
-# level, so the managed allow alone wouldn't lift it. Unfiltered when there
-# are no managed settings to read.
-user_settings="$HOME/.claude/settings.json"
-if [[ -e "$user_settings" ]]; then
-  if [[ -r "${MANAGED_SETTINGS:-}" ]] &&
-    jq --slurpfile m "$MANAGED_SETTINGS" '
-      ($m[0].permissions.allow // []) as $allow
-      | if (.permissions.deny | type) == "array"
-        then .permissions.deny |= map(select(. as $r | $allow | index($r) | not))
-        else . end' "$user_settings" > "$tmp_dir/settings.json" 2>/dev/null; then
-    protect_mounts+=(-v "$tmp_dir/settings.json:$user_settings:ro")
+agent_mounts=()
+agent_env_flags=()
+if [[ "$agent" == claude ]]; then
+  for p in "$claude_home/skills" "$claude_home/agents" "$claude_home/CLAUDE.md"; do
+    [[ -e "$p" ]] && protect_mounts+=(-v "$p:$p:ro")
+  done
+  # The user settings, minus each deny rule the container's managed settings
+  # allow (e.g. rm -rf, denied on the host): a deny wins over an allow at any
+  # level, so the managed allow alone wouldn't lift it. Unfiltered when there
+  # are no managed settings to read.
+  user_settings="$claude_home/settings.json"
+  if [[ -e "$user_settings" ]]; then
+    if [[ -r "${MANAGED_SETTINGS:-}" ]] &&
+      jq --slurpfile m "$MANAGED_SETTINGS" '
+        ($m[0].permissions.allow // []) as $allow
+        | if (.permissions.deny | type) == "array"
+          then .permissions.deny |= map(select(. as $r | $allow | index($r) | not))
+          else . end' "$user_settings" > "$tmp_dir/settings.json" 2>/dev/null; then
+      protect_mounts+=(-v "$tmp_dir/settings.json:$user_settings:ro")
+    else
+      protect_mounts+=(-v "$user_settings:$user_settings:ro")
+    fi
+  fi
+  agent_mounts=(
+    -v "$claude_home:$claude_home:rw"
+    -v "$claude_json:$claude_json:rw"
+  )
+  [[ -n "${AGENT_HOME:-}" ]] && agent_env_flags=(-e "CLAUDE_CONFIG_DIR=$claude_home")
+fi
+
+# kiro's state: unlike ~/.claude, the host's ~/.kiro is never mounted
+# writable. ~/.kiro holds what kiro-open on the host would act on: workspace
+# trust and "always allow" rules (workspace-roots/), agents with hooks,
+# MCP servers, settings. A sandbox writing those could have the host run its
+# commands. So the sandbox gets an ~/.kiro and a kiro-cli data dir of its own,
+# kept across sessions in ~/.local/share/kiro-sandbox/ (its sessions, trust
+# and rules stay there), and on top of it, from the host:
+#  * agents, skills, steering, hooks and powers, read-only
+#  * a throwaway copy of ~/.kiro/settings (cli.json and friends), whose
+#    mcp.json is the host's servers plus sandbox-proxy's and the extra ones;
+#    what a session changes there is gone at exit
+# The data dir is separate too: kiro-cli extracts the runtimes it runs (bun,
+# node, the agent server under kas/) there, and a sandbox must not be able to
+# replace what the host executes. It gets the host's login once: a copy of
+# data.sqlite3 (sqlite's .backup, consistent while the host runs kiro), minus
+# conversations and the records of extracted runtimes.
+if [[ "$agent" == kiro ]]; then
+  # With an agent profile (AGENT=<profile>, modules/apps/agents) its home
+  # takes ~/.kiro's place (KIRO_HOME of kiro-open), its login is in
+  # <home>/.data/kiro-cli (kiro-open's XDG_DATA_HOME) and the sandbox's own
+  # state in <home>/.sandbox
+  if [[ -n "${AGENT_HOME:-}" ]]; then
+    [[ "$AGENT_HOME" == /* ]] || { echo "$sandbox_name: AGENT_HOME must be absolute: $AGENT_HOME" >&2; exit 1; }
+    kiro_home="$AGENT_HOME"
+    kiro_state="$AGENT_HOME/.sandbox"
+    host_db="$AGENT_HOME/.data/kiro-cli/data.sqlite3"
+    log "profile ${AGENT_PROFILE:-?}: kiro's config in $kiro_home"
   else
-    protect_mounts+=(-v "$user_settings:$user_settings:ro")
+    kiro_home="$HOME/.kiro"
+    kiro_state="${XDG_DATA_HOME:-$HOME/.local/share}/kiro-sandbox"
+    host_db="$HOME/.local/share/kiro-cli/data.sqlite3"
+  fi
+  mkdir -p "$kiro_state/kiro" "$kiro_state/data"
+  chmod 700 "$kiro_state"
+  sandbox_db="$kiro_state/data/data.sqlite3"
+  if [[ ! -e "$sandbox_db" && -f "$host_db" ]]; then
+    log "kiro: copying your kiro-cli login into $kiro_state/data (once)"
+    if sqlite3 "$host_db" ".backup '$sandbox_db'" 2>/dev/null; then
+      chmod 600 "$sandbox_db"
+      for t in conversations conversations_v2 history extracted_kas_versions pinned_bin_versions; do
+        sqlite3 "$sandbox_db" "DELETE FROM $t;" 2>/dev/null || true
+      done
+    else
+      rm -f "$sandbox_db"
+      warn "kiro: couldn't copy the host login; run 'kiro login --use-device-flow' in the sandbox"
+    fi
+  elif [[ ! -e "$sandbox_db" ]]; then
+    log "kiro: no host login to copy; run 'kiro login --use-device-flow' in the sandbox"
+  fi
+  agent_mounts=(
+    -v "$kiro_state/kiro:$HOME/.kiro:rw"
+    -v "$kiro_state/data:$HOME/.local/share/kiro-cli:rw"
+  )
+  for d in agents skills steering hooks powers; do
+    [[ -e "$kiro_home/$d" ]] && agent_mounts+=(-v "$kiro_home/$d:$HOME/.kiro/$d:ro")
+  done
+  kiro_settings="$tmp_dir/kiro-settings"
+  mkdir -p "$kiro_settings"
+  for f in "$kiro_home/settings"/*.json; do
+    [[ -f "$f" && "$(basename "$f")" != mcp.json ]] && cp "$f" "$kiro_settings/"
+  done
+  host_mcp='{"mcpServers":{}}'
+  if [[ -f "$kiro_home/settings/mcp.json" ]]; then
+    host_mcp="$(jq -c '{mcpServers: (.mcpServers // {})}' "$kiro_home/settings/mcp.json" 2>/dev/null)" \
+      || { warn "kiro: $kiro_home/settings/mcp.json isn't valid JSON, leaving its servers out"; host_mcp='{"mcpServers":{}}'; }
+  fi
+  printf '%s\n' "$host_mcp" "$proxy_mcp_config" "$extra_mcp_config" \
+    | jq -s '{mcpServers: (map(select(. != null) | .mcpServers // {}) | add // {})}' > "$kiro_settings/mcp.json"
+  log "kiro: MCP servers: $(jq -r '.mcpServers | keys | join(", ")' "$kiro_settings/mcp.json")"
+  agent_mounts+=(-v "$kiro_settings:$HOME/.kiro/settings:rw")
+fi
+
+# kiro chats trust every tool by default, as Claude's permission layer is
+# opened up for what the sandbox contains (managed settings): the container
+# is the boundary, and pushes still go through git-ssh-broker, which refuses
+# force pushes and branch/tag deletes. Only a chat takes the flag (no
+# arguments starts one; login, agent, settings ... are left alone), a trust
+# flag on the command line wins, and SANDBOX_TRUST_ALL=0 keeps kiro's
+# prompts. The settings copy turns off kiro's "trust all?" confirmation; it
+# is dropped at exit, so the host's settings never change.
+agent_args=("$@")
+if [[ "$agent" == kiro && "${SANDBOX_TRUST_ALL:-1}" != 0 ]] && { (( $# == 0 )) || [[ "$1" == chat ]]; }; then
+  trust_given=0
+  for a in "${@:2}"; do
+    [[ "$a" == -- ]] && break
+    case "$a" in -a|--trust-all-tools|--trust-tools|--trust-tools=*) trust_given=1 ;; esac
+  done
+  if (( trust_given )); then
+    log "kiro: trust as given on the command line"
+  else
+    agent_args=(chat --trust-all-tools "${@:2}")
+    cli_json="$kiro_settings/cli.json"
+    [[ -f "$cli_json" ]] || echo '{}' > "$cli_json"
+    if jq '. + {"chat.disableTrustAllConfirmation": true}' "$cli_json" > "$cli_json.tmp" 2>/dev/null; then
+      mv "$cli_json.tmp" "$cli_json"
+    else
+      rm -f "$cli_json.tmp"
+      warn "kiro: ~/.kiro/settings/cli.json isn't valid JSON; kiro may ask to confirm trusting all tools"
+    fi
+    log "kiro: the chat trusts all tools (SANDBOX_TRUST_ALL=0 to be asked)"
   fi
 fi
 for d in "$project_root" "${rw_dirs[@]}"; do
@@ -848,9 +1076,10 @@ for v in TERM COLORTERM; do
   [[ -n "${!v:-}" ]] && env_pass+=(-e "$v=${!v}")
 done
 
-# Host variables passed in: CLAUDE_SANDBOX_PASS_ENV, space-separated name
-# globs (e.g. set by the system config for tools used inside the sandbox)
-read -ra pass_globs <<< "${CLAUDE_SANDBOX_PASS_ENV:-}"
+# Host variables passed in: space-separated name globs, the configured ones
+# (SANDBOX_CONFIG_PASS_ENV, from programs.<agent>Sandbox.passEnv) plus
+# SANDBOX_PASS_ENV from the environment
+read -ra pass_globs <<< "${SANDBOX_CONFIG_PASS_ENV:-} ${SANDBOX_PASS_ENV:-}"
 if [[ ${#pass_globs[@]} -gt 0 ]]; then
   while IFS= read -r v; do
     for g in "${pass_globs[@]}"; do
@@ -866,13 +1095,21 @@ fi
 # herdr's usage rows (modules/apps/herdr): the status line script can't
 # reach herdr from the container, and herdr's socket would let the sandbox
 # drive every pane, so it writes its fields, one per line, to a file in a
-# directory mounted from the host (CLAUDE_SANDBOX_HERDR_DIR), and this
+# directory mounted from the host (SANDBOX_HERDR_DIR), and this
 # launcher, which runs in the herdr pane, reports them. Values are cut to
 # 64 characters with control characters removed; a symlink is ignored.
+#
+# kiro has no status line command, so for kiro this launcher reads the usage
+# kiro-cli's v3 engine records itself (kiro_usage below) from the sandbox's
+# ~/.kiro, which is a host directory: nothing is mounted for it.
 herdr_mounts=()
 herdr_env_flags=()
-herdr_tokens=(ctx_ok ctx_warn ctx_hot five_hour five_hour_warn five_hour_hot
-  seven_day seven_day_warn seven_day_hot reset)
+if [[ "$agent" == kiro ]]; then
+  herdr_tokens=(ctx_ok ctx_warn ctx_hot credits usage_error)
+else
+  herdr_tokens=(ctx_ok ctx_warn ctx_hot five_hour five_hour_warn five_hour_hot
+    seven_day seven_day_warn seven_day_hot reset)
+fi
 # herdr_report <file>: the file's lines as the tokens, in order; "" clears them
 herdr_report() {
   local fields=() args=() v i
@@ -882,13 +1119,94 @@ herdr_report() {
     v="${v//[[:cntrl:]]/}"
     args+=(--token "${herdr_tokens[i]}=${v:0:64}")
   done
-  "$HERDR_BIN" pane report-metadata "$HERDR_PANE_ID" --source claude-usage \
+  "$HERDR_BIN" pane report-metadata "$HERDR_PANE_ID" --source "$agent-usage" \
     --seq "$(date +%s%N)" "${args[@]}" >/dev/null 2>&1 || true
 }
-if [[ "${HERDR_ENV:-}" == 1 && -n "${HERDR_PANE_ID:-}" && -n "${HERDR_BIN:-}" ]]; then
+
+# kiro_usage <sessions dir> <session index> <launch marker>: the fields of
+# herdr_tokens, one per line, for the newest session in <sessions dir> (the
+# sandbox's ~/.kiro/sessions/<first 16 hex of sha256(cwd)>) written since
+# launch: the context window used (its last session_metadata contextUsage
+# record: ctx_ok, ctx_warn from 60%, ctx_hot from 80%) and the credits its
+# turns used (the usage_summary records). Nothing before the session has
+# one. These files are kiro's own, not an interface: when they stop reading
+# as expected, the only field is usage_error ("usage ERROR", red in herdr),
+# and the reason goes to stderr. Written by the sandbox, so they are
+# untrusted: only numbers are taken from them.
+kiro_usage() {
+  local dir="$1" index="$2" marker="$3" f n out p
+  f="$(find "$dir" -mindepth 2 -maxdepth 2 -name messages.jsonl -type f -newer "$marker" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | head -n 1 | cut -d' ' -f2-)" || f=
+  if [[ -z "$f" ]]; then
+    # kiro indexed a session for this directory since launch (over 30s
+    # ago), but its folder isn't where the index says
+    if [[ -f "$index" && "$index" -nt "$marker" ]] \
+      && (( $(date +%s) - $(stat -c %Y "$index" 2>/dev/null || date +%s) > 30 )); then
+      p="$(jq -rs '[.[] | select(.op? == "add") | .sessionPath?] | last // empty' "$index" 2>/dev/null)" || p=
+      if [[ -z "$p" || ! -d "$(dirname "$dir")/$p" ]]; then
+        echo "kiro usage: $index lists no session folder under $(dirname "$dir") (got '${p:0:100}')" >&2
+        printf '\n\n\n\nusage ERROR\n'
+      fi
+    fi
+    return 0
+  fi
+  n="$(wc -l < "$f" 2>/dev/null)" || n=0
+  if ! out="$({ grep -F -e '"contextUsage"' -e '"usage_summary"' -- "$f" || true; } | jq -rs --argjson lines "$n" '
+      def fmt: (. * 100 | round) / 100 | tostring;
+      [.[] | .payload? // {} | select(.type? == "session_metadata" and .key? == "contextUsage")] as $meta
+      | [.[] | .payload? // {} | select(.type? == "usage_summary")] as $sums
+      | ($meta | last | .value.usagePercentage?) as $ctx
+      | [$sums[] | .promptTurnSummaries[]? | select(.unit? == "credit") | .usage] as $credits
+      | if ($meta | length) > 0 and ($ctx | type) != "number" then "contextUsage has no numeric usagePercentage"
+        elif ($sums | length) > 0 and ($credits | length) == 0 then "usage_summary has no credit usage"
+        elif ($credits | any(type != "number")) then "a credit usage is not a number"
+        elif ($meta | length) == 0 and $lines > 100 then "no contextUsage record in \($lines) lines"
+        else
+          (if $ctx == null then ["", "", ""]
+           else ("ctx \($ctx | round)%") as $s
+             | if $ctx >= 80 then ["", "", $s] elif $ctx >= 60 then ["", $s, ""] else [$s, "", ""] end
+           end)
+          + [if ($credits | length) == 0 then "" else "\($credits | add | fmt) credits" end, ""]
+          | map(if . == "" then "-" else . end) | @tsv
+        end' 2>&1)"; then
+    out="kiro's records aren't JSON: ${out:0:200}"
+  fi
+  if [[ "$out" == *$'\t'* ]]; then
+    tr '\t' '\n' <<< "$out" | sed 's/^-$//'
+  else
+    echo "kiro usage: $f: $out" >&2
+    printf '\n\n\n\nusage ERROR\n'
+  fi
+}
+
+if [[ "$agent" == kiro && "${HERDR_ENV:-}" == 1 && -n "${HERDR_PANE_ID:-}" && -n "${HERDR_BIN:-}" ]]; then
+  herdr_dir="$(mktemp -d)"
+  touch "$herdr_dir/launched"
+  cwd_hash="$(printf '%s' "$PWD" | sha256sum | cut -c1-16)"
+  kiro_sessions="$kiro_state/kiro/sessions/$cwd_hash"
+  kiro_index="$kiro_state/kiro/session-index/$cwd_hash.jsonl"
+  (
+    last='' last_err=''
+    while sleep 2; do
+      kiro_usage "$kiro_sessions" "$kiro_index" "$herdr_dir/launched" > "$herdr_dir/usage" 2> "$herdr_dir/error"
+      cur="$(cat "$herdr_dir/usage")"
+      if [[ "$cur" != "$last" ]]; then
+        herdr_report "$herdr_dir/usage"
+        last="$cur"
+      fi
+      err="$(cat "$herdr_dir/error")"
+      if [[ -n "$err" && "$err" != "$last_err" ]]; then
+        log_line "warning: $err (kiro's session format may have changed)" >/dev/null
+      fi
+      last_err="$err"
+    done
+  ) &
+  herdr_watch_pid=$!
+fi
+if [[ "$agent" == claude && "${HERDR_ENV:-}" == 1 && -n "${HERDR_PANE_ID:-}" && -n "${HERDR_BIN:-}" ]]; then
   herdr_dir="$(mktemp -d)"
   herdr_mounts=(-v "$herdr_dir:$herdr_dir")
-  herdr_env_flags=(-e "CLAUDE_SANDBOX_HERDR_DIR=$herdr_dir")
+  herdr_env_flags=(-e "SANDBOX_HERDR_DIR=$herdr_dir")
   (
     last=
     while sleep 2; do
@@ -930,12 +1248,15 @@ done
 # is hit otherwise), and stdio MCP and language servers get claude as a
 # real parent: one that watches its parent to know when to exit can't with
 # PID 1 as its parent.
-log "starting claude in $pod_name-claude (pulls its image on first use)"
+log "starting $agent in $pod_name-$agent (pulls its image on first use)"
 claude_started=1
 # Container-only managed settings (the kill and delete allow rules), set
 # by the Nix wrapper; without it the session just lacks those rules
+# (Claude only: kiro-cli has no managed settings)
 managed_mounts=()
-if [[ -n "${MANAGED_SETTINGS:-}" ]]; then
+if [[ "$agent" != claude ]]; then
+  :
+elif [[ -n "${MANAGED_SETTINGS:-}" ]]; then
   managed_mounts=(-v "$MANAGED_SETTINGS:/etc/claude-code/managed-settings.json:ro")
 else
   echo "claude-sandbox: MANAGED_SETTINGS is unset; kill and delete commands keep Claude's default permission checks" >&2
@@ -954,10 +1275,10 @@ cacert_mounts=(
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
 podman run --rm "${tty_flags[@]}" \
   --init \
-  --name "$pod_name-claude" \
+  --name "$pod_name-$agent" \
   --pod "$pod_name" \
   "${name_labels[@]}" \
-  --label claude-sandbox.role=claude \
+  --label "$sandbox_name.role=$agent" \
   --privileged \
   --pull=missing \
   --tz=local \
@@ -967,8 +1288,7 @@ podman run --rm "${tty_flags[@]}" \
   "${dir_mounts[@]}" \
   -w "$PWD" \
   -v "$asdf_data_dir:$asdf_data_dir:ro" \
-  -v "$HOME/.claude:$HOME/.claude:rw" \
-  -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
+  "${agent_mounts[@]}" \
   "${managed_mounts[@]}" \
   "${cacert_mounts[@]}" \
   "${mounts[@]}" \
@@ -984,13 +1304,14 @@ podman run --rm "${tty_flags[@]}" \
   -e GIT_CONFIG_GLOBAL="$GIT_GLOBAL_CONFIG" \
   "${git_config_flags[@]}" \
   "${git_env_flags[@]}" \
-  -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$claude_out/bin:/usr/bin:/bin" \
+  -e PATH="$asdf_data_dir/shims:$ASDF_VM_BIN:$NESTED_PODMAN_ENV_BIN:$DEV_TOOLS_BIN:$agent_out/bin:/usr/bin:/bin" \
   "${registry_env_flags[@]}" \
   "${dbus_env_flags[@]}" \
   "${nix_env_flags[@]}" \
   "${env_pass[@]}" \
   "${herdr_env_flags[@]}" \
-  "$CLAUDE_SANDBOX_IMAGE" \
-  "$NESTED_PODMAN_SETUP" "$claude_out/bin/claude" "${mcp_flags[@]}" "$@"
+  "${agent_env_flags[@]}" \
+  "$SANDBOX_IMAGE" \
+  "$NESTED_PODMAN_SETUP" "${agent_cmd[@]}" "${mcp_flags[@]}" "${agent_args[@]}"
 code=$?
 exit "$code"

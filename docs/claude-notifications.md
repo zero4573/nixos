@@ -26,9 +26,9 @@ sequenceDiagram
     participant F as flag file
     participant D as notify-send
     C->>N: PreToolUse AskUserQuestion or Notification (JSON on stdin)
-    N->>N: walk up from cwd to HOME looking for a ct workspace
-    alt cwd is in a ct workspace
-        N-->>C: exit, ct's own hook notifies
+    N->>N: walk up from cwd to HOME looking for a tix workspace
+    alt cwd is in a tix workspace
+        N-->>C: exit, tix's own hook notifies
     else flag file exists for this session
         N-->>C: exit, already notified
     else
@@ -39,9 +39,9 @@ sequenceDiagram
     N->>F: remove the flag
 ```
 
-- A ct workspace is a directory with `CLAUDE.md` and a `workspace.json` that has
+- A tix workspace is a directory with `CLAUDE.md` and a `workspace.json` that has
   an `id`, at or above the cwd and below `$HOME`. Those sessions are left to
-  ct's hook, which also knows not to ping while the ticket's agents run.
+  tix's hook, which also knows not to ping while the ticket's agents run.
 - The message is the first question of an `AskUserQuestion`, else the
   notification's `message`, else `needs you`.
 - One notification per session until the user answers: the flag lives in

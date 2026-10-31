@@ -7,9 +7,10 @@ _: {
   #       passes through untouched; what the session may touch follows
   #       Claude's settings (--add-dir and permissions.additionalDirectories
   #       mount read-write, Edit/Write deny rules inside them read-only).
-  #       Sandbox-only settings are environment variables (CLAUDE_SANDBOX_*:
-  #       ports, pod name, quiet launch, host variables to pass
-  #       in, read-only host paths: programs.claudeSandbox.readOnlyPaths);
+  #       Sandbox-only settings are environment variables (SANDBOX_*, the
+  #       same for kiro-sandbox: ports, pod name, quiet launch, host
+  #       variables to pass in, more read-write directories, read-only host
+  #       paths added to programs.claudeSandbox.readOnlyPaths);
   #       `claude-sandbox --help` lists them. Tools run through claude
   #       don't need to know they're sandboxed.
   #  * claude-sandbox - the same command, kept as an alias; its --help
@@ -45,7 +46,9 @@ _: {
   #  nixpkgs and the container image by digest. See UPDATES.md.
   #
   # Script bodies live in sibling files (claude-sandbox.sh,
-  # claude-sandbox-nested-podman-setup.sh)
+  # claude-sandbox-nested-podman-setup.sh). claude-sandbox.sh also runs
+  # kiro-cli (SANDBOX_AGENT=kiro, modules/apps/kiro/kiro-sandbox.nix), which
+  # takes its agent-independent pieces from programs.claudeSandbox.shared.
   flake.homeModules.claudeSandbox = { pkgs, lib, config, ... }:
   let
     cfg = config.programs.claudeSandbox;
@@ -85,9 +88,15 @@ _: {
       cp ${pkgs.writeText "lsp.json" (builtins.toJSON cfg.lspServers)} $out/.lsp.json
     '';
 
+    # AGENT=<profile> (modules/apps/agents): a claude profile's home is
+    # Claude's config dir (CLAUDE_CONFIG_DIR)
     claudeOpen = pkgs.writeShellApplication {
       name = "claude-open";
+      runtimeInputs = [ pkgs.jq pkgs.coreutils ];
       text = ''
+        ${config.programs.agents.profileLib}
+        agent_profile claude
+        if [[ -n "''${AGENT_HOME:-}" ]]; then export CLAUDE_CONFIG_DIR="$AGENT_HOME"; fi
         ${gitUpdate} "$PWD"
         exec ${lib.getExe' cfg.package "claude"} --plugin-dir ${lspPlugin} "$@"
       '';
@@ -143,11 +152,10 @@ _: {
     # Basic Linux and developer tools for use inside the sandbox (the slim
     # Debian image has little beyond coreutils/grep/sed), plus whatever other
     # modules add through programs.claudeSandbox.extraPackages (e.g. the
-    # claude-tickets tools, see modules/apps/claude-tickets.nix). They come
+    # tix tools, see modules/apps/tix.nix). They come
     # before the image's /usr/bin on PATH, so they shadow its own copies.
-    devToolsEnv = pkgs.buildEnv {
-      name = "claude-sandbox-dev-tools";
-      paths = with pkgs; [
+    # (baseDevTools is shared with kiro-sandbox, which adds its own extras.)
+    baseDevTools = with pkgs; [
         git
         coreutils findutils diffutils gnugrep gnused gawk patch less file
         which tree ripgrep fd jq yq-go bc
@@ -157,7 +165,7 @@ _: {
         gnumake
         shellcheck
         # Jujutsu (jj), for rewriting a ticket branch's unpushed commits into a
-        # tidy history in a scratch clone (the tickets:tidy skill).
+        # tidy history in a scratch clone (the tix:tidy skill).
         jujutsu
         # ssh-keygen for the signing testscripts (client tools only, no sshd).
         openssh
@@ -170,8 +178,10 @@ _: {
         # protocol after a flake update, pin the client to the host's version
         # (osConfig.nix.package when HM runs as a NixOS module).
         nix
-        selfCheck
-      ] ++ cfg.extraPackages;
+    ];
+    devToolsEnv = pkgs.buildEnv {
+      name = "claude-sandbox-dev-tools";
+      paths = baseDevTools ++ [ selfCheck ] ++ cfg.extraPackages;
     };
 
     # programs.claudeSandbox.extraMcpServers as an MCP config file in the
@@ -192,8 +202,28 @@ _: {
         permissions.deny = sandboxDenyRules;
       });
 
+    # The launcher's environment that doesn't depend on the agent (shared
+    # with kiro-sandbox through programs.claudeSandbox.shared)
+    launcherInputs = [ pkgs.podman pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq pkgs.git pkgs.gnused ];
+    commonExports = ''
+      export SANDBOX_IMAGE=${lib.escapeShellArg cfg.image}
+      export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
+      export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
+      export NIX_DAEMON_SOCKET_DIR=/nix/var/nix/daemon-socket
+      export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
+      export CLAUDE_GIT_UPDATE=${gitUpdate}
+      export GIT_SSH_BROKER=${lib.getExe' config.programs.gitSshBroker.package "git-ssh-broker"}
+      export GIT_SSH_BROKER_SSH=${lib.getExe' pkgs.openssh "ssh"}
+      export GIT_SSH_BROKER_UPSTREAM_AGENT=${lib.escapeShellArg config.programs.gitSshBroker.upstreamAgent}
+      export SANDBOX_SIGNING_KEYS=${lib.escapeShellArg (lib.concatStringsSep ":" config.programs.gitSshBroker.signingKeys)}
+      export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
+      export GIT_GLOBAL_CONFIG=${config.xdg.configFile."git/config".source}
+      export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+      export HERDR_BIN=${lib.getExe pkgs.herdr}
+    '';
+
     # One launcher, installed as claude and as claude-sandbox (whose --help
-    # describes the sandbox). CLAUDE_SANDBOX_RO_PATHS is colon-separated, so
+    # describes the sandbox). SANDBOX_CONFIG_RO_PATHS is colon-separated, so
     # no readOnlyPaths entry may contain a colon: the assert below fails the
     # evaluation with that message instead of splitting the entry in two at
     # launch.
@@ -203,30 +233,24 @@ _: {
         "programs.claudeSandbox.readOnlyPaths: no entry may contain ':'";
       pkgs.writeShellApplication {
       inherit name;
-      runtimeInputs = [ pkgs.podman pkgs.systemd pkgs.xdg-dbus-proxy pkgs.coreutils pkgs.jq pkgs.git pkgs.gnused ];
+      runtimeInputs = launcherInputs;
       text = ''
-        export CLAUDE_SANDBOX_AS=${name}
-        export CLAUDE_SANDBOX_PASS_ENV="''${CLAUDE_SANDBOX_PASS_ENV:-${lib.concatStringsSep " " cfg.passEnv}}"
-        export CLAUDE_SANDBOX_RO_PATHS="''${CLAUDE_SANDBOX_RO_PATHS:-${lib.concatStringsSep ":" cfg.readOnlyPaths}}"
+        export SANDBOX_AGENT=claude
+        export SANDBOX_AS=${name}
+        # the configured lists; SANDBOX_PASS_ENV / SANDBOX_RO_PATHS in the
+        # environment add to them
+        export SANDBOX_CONFIG_PASS_ENV=${lib.escapeShellArg (lib.concatStringsSep " " cfg.passEnv)}
+        export SANDBOX_CONFIG_RO_PATHS=${lib.escapeShellArg (lib.concatStringsSep ":" cfg.readOnlyPaths)}
         export CLAUDE_CODE=${cfg.package}
-        export CLAUDE_SANDBOX_IMAGE=${lib.escapeShellArg cfg.image}
-        export NESTED_PODMAN_SETUP=${nestedPodmanSetup}
-        export NESTED_PODMAN_ENV_BIN=${nestedPodmanEnv}/bin
+        ${commonExports}
         export DEV_TOOLS_BIN=${devToolsEnv}/bin
         export MANAGED_SETTINGS=${managedSettings}
-        export NIX_DAEMON_SOCKET_DIR=/nix/var/nix/daemon-socket
-        export ASDF_VM_BIN=${pkgs.asdf-vm}/bin
         export EXTRA_MCP_CONFIG=${lib.escapeShellArg extraMcpConfig}
         export CLAUDE_LSP_PLUGIN=${lspPlugin}
-        export CLAUDE_GIT_UPDATE=${gitUpdate}
-        export GIT_SSH_BROKER=${lib.getExe' config.programs.gitSshBroker.package "git-ssh-broker"}
-        export GIT_SSH_BROKER_SSH=${lib.getExe' pkgs.openssh "ssh"}
-        export GIT_SSH_BROKER_UPSTREAM_AGENT=${lib.escapeShellArg config.programs.gitSshBroker.upstreamAgent}
-        export CLAUDE_SANDBOX_SIGNING_KEYS=${lib.escapeShellArg (lib.concatStringsSep ":" config.programs.gitSshBroker.signingKeys)}
-        export GIT_GLOBAL_IGNORE=${config.xdg.configFile."git/ignore".source}
-        export GIT_GLOBAL_CONFIG=${config.xdg.configFile."git/config".source}
-        export CACERT_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-        export HERDR_BIN=${lib.getExe pkgs.herdr}
+        # AGENT=<profile> (modules/apps/agents): AGENT_PROFILE / AGENT_HOME
+        # for the launcher, which mounts that home as Claude's config dir
+        ${config.programs.agents.profileLib}
+        agent_profile claude
         # argv[0] "claude" (for both names) so herdr, which identifies agents
         # by the pane's foreground processes, recognises the session: the
         # real claude runs inside the container, out of its sight
@@ -253,18 +277,18 @@ _: {
       description = "Pinned image claude-sandbox runs Claude in.";
     };
     # Host variables passed into the sandbox (name globs), built into the
-    # launcher so they apply right after a switch; CLAUDE_SANDBOX_PASS_ENV
-    # in the environment wins
+    # launcher so they apply right after a switch; SANDBOX_PASS_ENV in the
+    # environment adds more
     options.programs.claudeSandbox.passEnv = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "CLAUDE_TICKETS_*" ];
+      example = [ "TIX_*" ];
       description = "Names (globs) of host environment variables passed into the sandbox.";
     };
 
     # Host paths every session gets read-only at the same path (also when
     # the session didn't pass them as --add-dir), e.g. a cache a tool reads;
-    # built into the launcher, CLAUDE_SANDBOX_RO_PATHS (colon-separated) wins
+    # built into the launcher, SANDBOX_RO_PATHS (colon-separated) adds more
     options.programs.claudeSandbox.readOnlyPaths = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -362,6 +386,31 @@ _: {
         };
       };
       description = "Language servers (Claude Code .lsp.json entries, by name) for the LSP tool in every claude and claude-open session.";
+    };
+
+    # What kiro-sandbox (modules/apps/kiro/kiro-sandbox.nix) shares with
+    # this launcher: the script itself (SANDBOX_AGENT picks the agent), the
+    # agent-independent part of its environment, its runtime inputs, the base
+    # dev tools and the git update. Internal: not a setting.
+    options.programs.claudeSandbox.shared = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      internal = true;
+      readOnly = true;
+      default = {
+        script = ./claude-sandbox.sh;
+        inherit commonExports launcherInputs baseDevTools gitUpdate;
+      };
+      description = "The sandbox launcher pieces kiro-sandbox reuses.";
+    };
+
+    # The commands modules/apps/agents' agent / agent-open run for a claude
+    # profile. Internal: not a setting.
+    options.programs.claudeSandbox.commands = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      internal = true;
+      readOnly = true;
+      default = { sandbox = sandboxLauncher "claude"; open = claudeOpen; };
+      description = "The claude wrappers (sandboxed and open) the agent dispatcher runs.";
     };
 
     config.home.packages = [ (sandboxLauncher "claude") (sandboxLauncher "claude-sandbox") claudeOpen ];

@@ -53,10 +53,12 @@ flowchart LR
 | Component | Where | Page |
 | --- | --- | --- |
 | claude-sandbox | `modules/apps/claude/` | [claude-sandbox](./claude-sandbox.md) |
+| kiro-sandbox | `modules/apps/kiro/` (runs claude-sandbox's launcher) | [kiro-sandbox](./kiro-sandbox.md) |
+| agent accounts (`agent`, `agent-open`, `agent-configure`) | `modules/apps/agents/` | [agents](./agents.md) |
 | sandbox-proxy | `modules/apps/sandbox-proxy/` | [sandbox-proxy](./sandbox-proxy.md) |
 | asdf-gcroots | `modules/apps/asdf/` | [asdf-gcroots](./asdf-gcroots.md) |
 | claude-code settings and hooks | `modules/apps/claude/claude-code.nix` | [claude-notifications](./claude-notifications.md) |
-| claude-tickets wiring | `modules/apps/claude-tickets.nix` | [claude-tickets](./claude-tickets.md) |
+| tix wiring | `modules/apps/tix.nix` | [tix](./tix.md) |
 | herdr and ttt | `modules/apps/herdr.nix`, `ttt.nix` | [terminal-tools](./terminal-tools.md) |
 | checks and builds | `flake.nix`, `*-check.nix` | [building-and-checking](./building-and-checking.md) |
 

@@ -5,6 +5,8 @@
 # and coreutils. Usage: claude-sandbox-test.sh [path to claude-sandbox.sh]
 # (default: the sibling script). Also a flake check, claude-sandbox-check.nix.
 set -euo pipefail
+# The sandbox settings of the shell running the test never reach a case
+while IFS= read -r v; do unset "$v"; done < <(compgen -e | grep -E '^(SANDBOX|CLAUDE_SANDBOX|KIRO_SANDBOX)_' || true)
 
 script="$(realpath "${1:-$(dirname "${BASH_SOURCE[0]}")/claude-sandbox.sh}")"
 root="$(realpath "$(mktemp -d)")"
@@ -33,9 +35,16 @@ if [[ "$1" == run ]]; then
   # STUB_USAGE: a status line's usage file, written as the container would,
   # then left for the launcher's relay (which polls every 2s) to report
   if [[ -n "${STUB_USAGE:-}" ]]; then
-    dir="$(printf '%s\n' "$@" | sed -n 's/^CLAUDE_SANDBOX_HERDR_DIR=//p')"
+    dir="$(printf '%s\n' "$@" | sed -n 's/^SANDBOX_HERDR_DIR=//p')"
     printf '%b' "$STUB_USAGE" > "$dir/usage"
     sleep 3
+  fi
+  # STUB_KIRO_SESSION: lines kiro-cli would write to its session file
+  # (STUB_KIRO_FILE), then left for the launcher's usage relay to read
+  if [[ -n "${STUB_KIRO_FILE:-}" ]]; then
+    mkdir -p "$(dirname "$STUB_KIRO_FILE")"
+    printf '%b' "${STUB_KIRO_SESSION:-}" > "$STUB_KIRO_FILE"
+    sleep "${STUB_KIRO_WAIT:-3}"
   fi
   prev=
   for a in "$@"; do
@@ -44,6 +53,9 @@ if [[ "$1" == run ]]; then
     fi
     if [[ "$prev" == -v && "$a" == *:*/.claude/settings.json:ro ]]; then
       cp "${a%%:*}" "$STUB_OUT/settings.copy"
+    fi
+    if [[ "$prev" == -v && "$a" == *:*/.kiro/settings:rw ]]; then
+      cp -r "${a%%:*}" "$STUB_OUT/kiro-settings.copy"
     fi
     prev="$a"
   done
@@ -65,6 +77,15 @@ STUB
 echo 'exit 0' | stub xdg-dbus-proxy
 echo 'exit 1' | stub sandbox-proxy
 echo 'exit 0' | stub git-update
+# sqlite3 records its arguments; `.backup '<file>'` creates the file
+stub sqlite3 <<'STUB'
+printf '%s\n' "$*" >> "$STUB_OUT/sqlite3.calls"
+if [[ "${2:-}" == ".backup '"*"'" ]]; then
+  dest="${2#.backup \'}"
+  echo copied > "${dest%\'}"
+fi
+exit 0
+STUB
 # herdr appends each call's arguments, one per line, then an "--end" line
 stub herdr <<'STUB'
 { printf '%s\n' "$@"; echo --end; } >> "$STUB_OUT/herdr.calls"
@@ -83,10 +104,10 @@ run_case() {
   XDG_STATE_HOME="$root/state" \
   XDG_RUNTIME_DIR="$root/run" \
   DBUS_SESSION_BUS_ADDRESS=disabled \
-  CLAUDE_SANDBOX_TEST="${sandbox_test:-1}" \
+  SANDBOX_TEST="${sandbox_test:-1}" \
   STUB_NIX_TRUSTED="${stub_nix_trusted:-0}" \
   CLAUDE_CODE=/nix/store/fake-claude \
-  CLAUDE_SANDBOX_IMAGE=fake-image \
+  SANDBOX_IMAGE=fake-image \
   NESTED_PODMAN_SETUP=/nix/store/fake-setup \
   NESTED_PODMAN_ENV_BIN=/nix/store/fake-podman/bin \
   DEV_TOOLS_BIN=/nix/store/fake-tools/bin \
@@ -101,7 +122,11 @@ run_case() {
   GIT_GLOBAL_CONFIG=/nix/store/fake-gitconfig \
   CACERT_BUNDLE=/nix/store/fake-ca.crt \
   NIX_DAEMON_SOCKET_DIR="${nix_socket_dir:-$root/no-daemon}" \
-  EXTRA_MCP_CONFIG="" \
+  EXTRA_MCP_CONFIG="${extra_mcp:-}" \
+  SANDBOX_AGENT="${sandbox_agent:-claude}" \
+  SANDBOX_AS="${sandbox_as:-}" \
+  KIRO_CLI=/nix/store/fake-kiro \
+  XDG_DATA_HOME="$home/.local/share" \
   bash -euo pipefail "$script" "$@" > "$out/stdout" 2> "$out/stderr" \
     || { fail "$out: the launch failed (exit $?)"; cat "$out/stderr" >&2; }
 }
@@ -125,23 +150,42 @@ new_home() {
   cd "$proj"
 }
 
-# 1. A read-only path that is a parent of an --add-dir is skipped, with a
-# warning, and not mounted read-only over it
+# 1. A read-only path that is a parent of an --add-dir is mounted read-only
+# around it; the more specific --add-dir stays read-write (podman stacks by
+# depth)
 new_home parent
 mkdir -p "$home/ws/sub"
-CLAUDE_SANDBOX_RO_PATHS="$home/ws" run_case parent --add-dir "$home/ws/sub"
-assert_no_mount parent "$home/ws:$home/ws:ro" "RO parent of an --add-dir is not mounted"
-assert_mount parent "$home/ws/sub:$home/ws/sub:rw" "the --add-dir stays read-write"
-if grep -q "contains the read-write directory $home/ws/sub" "$root/out-parent/stderr"; then
-  ok "RO parent of an --add-dir warns"
+SANDBOX_RO_PATHS="$home/ws" run_case parent --add-dir "$home/ws/sub"
+assert_mount parent "$home/ws:$home/ws:ro" "RO parent of an --add-dir is read-only"
+assert_mount parent "$home/ws/sub:$home/ws/sub:rw" "the --add-dir in it stays read-write"
+
+# 1b. Duplicates: a directory given read-write several ways (--add-dir,
+# SANDBOX_ADD_DIRS, settings) is one mount; given read-only as well
+# (SANDBOX_RO_PATHS or the configured list, twice) it is one read-only mount
+new_home dups
+mkdir -p "$home/ws" "$home/cache" "$proj/.claude"
+printf '{"permissions":{"additionalDirectories":["%s"]}}\n' "$home/ws" > "$proj/.claude/settings.json"
+SANDBOX_ADD_DIRS="$home/ws:$home/ws/:$home/cache" SANDBOX_RO_PATHS="$home/cache:$home/cache/" \
+  SANDBOX_CONFIG_RO_PATHS="$home/cache" run_case dups --add-dir "$home/ws" "$home/cache"
+if [[ "$(mounts dups | grep -c "^$home/ws:")" == 1 ]] && has_mount dups "$home/ws:$home/ws:rw"; then
+  ok "a read-write directory given three ways is one mount"
 else
-  fail "no warning for the RO parent; stderr: $(cat "$root/out-parent/stderr")"
+  fail "dups ws: $(mounts dups | grep "$home/ws")"
 fi
+if [[ "$(mounts dups | grep -c "^$home/cache:")" == 1 ]] && has_mount dups "$home/cache:$home/cache:ro"; then
+  ok "a directory given read-write and read-only is one read-only mount"
+else
+  fail "dups cache: $(mounts dups | grep "$home/cache")"
+fi
+# 1c. The project itself given read-only is mounted read-only
+new_home roproj
+SANDBOX_RO_PATHS="$proj" run_case roproj
+assert_mount roproj "$proj:$proj:ro" "the project given read-only is read-only"
 
 # 2. A read-only path inside a read-write directory is mounted read-only
 new_home inside
 mkdir -p "$home/ws/cache"
-CLAUDE_SANDBOX_RO_PATHS="$home/ws/cache" run_case inside --add-dir "$home/ws"
+SANDBOX_RO_PATHS="$home/ws/cache" run_case inside --add-dir "$home/ws"
 assert_mount inside "$home/ws:$home/ws:rw" "the --add-dir is read-write"
 assert_mount inside "$home/ws/cache:$home/ws/cache:ro" "RO path inside a read-write dir is read-only"
 
@@ -284,17 +328,17 @@ if grep -q 'trusted nix user' "$root/out-trusted/stderr"; then ok "trusted nix u
 if grep -q NIX_REMOTE "$root/out-trusted/run.args"; then fail "NIX_REMOTE set for a trusted nix user"; else ok "trusted: no NIX_REMOTE"; fi
 for answer in none fail; do
   new_home "unknown-$answer"
-  CLAUDE_SANDBOX_QUIET=1 stub_nix_trusted=$answer nix_socket_dir="$root/daemon-socket" run_case "unknown-$answer"
+  SANDBOX_QUIET=1 stub_nix_trusted=$answer nix_socket_dir="$root/daemon-socket" run_case "unknown-$answer"
   assert_no_mount "unknown-$answer" "$root/daemon-socket:$root/daemon-socket" "nix answer '$answer': no daemon mount (fail closed)"
   if grep -q "couldn't tell" "$root/out-unknown-$answer/stderr"; then ok "nix answer '$answer': warned under QUIET"; else fail "nix answer '$answer': no warning"; fi
   if grep -q NIX_REMOTE "$root/out-unknown-$answer/run.args"; then fail "NIX_REMOTE set for unknown trust"; else ok "unknown $answer: no NIX_REMOTE"; fi
 done
 new_home forced
-CLAUDE_SANDBOX_NIX_DAEMON=1 stub_nix_trusted=none nix_socket_dir="$root/daemon-socket" run_case forced
-assert_mount forced "$root/daemon-socket:$root/daemon-socket" "unknown trust with CLAUDE_SANDBOX_NIX_DAEMON=1: mounted"
+SANDBOX_NIX_DAEMON=1 stub_nix_trusted=none nix_socket_dir="$root/daemon-socket" run_case forced
+assert_mount forced "$root/daemon-socket:$root/daemon-socket" "unknown trust with SANDBOX_NIX_DAEMON=1: mounted"
 new_home forcedtrusted
-CLAUDE_SANDBOX_NIX_DAEMON=1 stub_nix_trusted=1 nix_socket_dir="$root/daemon-socket" run_case forcedtrusted
-assert_no_mount forcedtrusted "$root/daemon-socket:$root/daemon-socket" "trusted user with CLAUDE_SANDBOX_NIX_DAEMON=1: still not mounted"
+SANDBOX_NIX_DAEMON=1 stub_nix_trusted=1 nix_socket_dir="$root/daemon-socket" run_case forcedtrusted
+assert_no_mount forcedtrusted "$root/daemon-socket:$root/daemon-socket" "trusted user with SANDBOX_NIX_DAEMON=1: still not mounted"
 new_home falsetrusted
 stub_nix_trusted=false nix_socket_dir="$root/daemon-socket" run_case falsetrusted
 assert_mount falsetrusted "$root/daemon-socket:$root/daemon-socket" "trusted:false: mounted"
@@ -306,7 +350,7 @@ sandbox_test=0 nix_socket_dir="/nix/var/nix/../../tmp" run_case escape
 assert_no_mount escape "/tmp:/tmp" "a .. escape from /nix/var/nix/ is refused"
 
 # 8. NIX_DAEMON_SOCKET_DIR outside /nix/var/nix/ is refused unless the test
-# sets CLAUDE_SANDBOX_TEST=1 (C04)
+# sets SANDBOX_TEST=1 (C04)
 new_home outside
 sandbox_test=0 nix_socket_dir="$root/daemon-socket" run_case outside
 assert_no_mount outside "$root/daemon-socket:$root/daemon-socket" "a NIX_DAEMON_SOCKET_DIR outside /nix/var/nix/ is refused"
@@ -324,7 +368,7 @@ if [[ -e "$home/.tool-versions" ]]; then fail "a ~/.tool-versions was created on
 # 10. readOnlyPaths=~/.tool-versions: that one mount only, host file or not (S03)
 new_home rofile
 echo "python 3.11.0" > "$home/.tool-versions"
-CLAUDE_SANDBOX_RO_PATHS="$home/.tool-versions" run_case rofile
+SANDBOX_RO_PATHS="$home/.tool-versions" run_case rofile
 n=$(mounts rofile | grep -c "/.tool-versions" || true)
 if [[ "$n" == 1 ]]; then ok "one ~/.tool-versions mount with readOnlyPaths"; else fail "$n ~/.tool-versions mounts: $(mounts rofile)"; fi
 
@@ -402,7 +446,7 @@ if [[ -n "${GIT_SSH_BROKER:-}" ]] && command -v ssh-agent >/dev/null && command 
   ssh-agent -D -a "$root/agent.sock" >/dev/null 2>&1 &
   agent_pid=$!
   for _ in $(seq 1 50); do [[ -S "$root/agent.sock" ]] && break; sleep 0.1; done
-  git_ssh_broker="$GIT_SSH_BROKER" SSH_AUTH_SOCK="$root/agent.sock" CLAUDE_SANDBOX_SIGNING_KEYS="$home/.ssh/work.pub:$home/.ssh/missing.pub" \
+  git_ssh_broker="$GIT_SSH_BROKER" SSH_AUTH_SOCK="$root/agent.sock" SANDBOX_SIGNING_KEYS="$home/.ssh/work.pub:$home/.ssh/missing.pub" \
     run_case broker
   kill "$agent_pid" 2>/dev/null || true
   if mounts broker | grep -qE '/git\.sock:.*/git\.sock$'; then ok "broker: git socket mounted"; else fail "broker: no git socket mount: $(mounts broker)"; fi
@@ -423,14 +467,14 @@ else
 fi
 
 # herdr: in a herdr pane, a directory for the status line's usage file is
-# mounted and named in CLAUDE_SANDBOX_HERDR_DIR, and the launcher clears the
+# mounted and named in SANDBOX_HERDR_DIR, and the launcher clears the
 # pane's usage rows on exit; outside one, neither
 home="$root/home-herdr"
 mkdir -p "$home/proj"
 cd "$home/proj"
 STUB_USAGE='ctx 12k\n\n\n5h ▰▱▱▱▱ 20%\e[31m\n' \
   herdr_env=1 herdr_pane=w1:p1 herdr_bin="$stubs/herdr" run_case herdr
-herdr_dir="$(awk '$0 == "-e" { getline; if (sub(/^CLAUDE_SANDBOX_HERDR_DIR=/, "")) print }' "$root/out-herdr/run.args")"
+herdr_dir="$(awk '$0 == "-e" { getline; if (sub(/^SANDBOX_HERDR_DIR=/, "")) print }' "$root/out-herdr/run.args")"
 if [[ -n "$herdr_dir" ]] && has_mount herdr "$herdr_dir:$herdr_dir"; then
   ok "herdr: the usage directory is mounted and named"
 else
@@ -455,10 +499,234 @@ else
   fail "herdr: $herdr_dir is left behind"
 fi
 herdr_bin="$stubs/herdr" run_case noherdr
-if grep -q CLAUDE_SANDBOX_HERDR_DIR "$root/out-noherdr/run.args" || [[ -e "$root/out-noherdr/herdr.calls" ]]; then
+if grep -q SANDBOX_HERDR_DIR "$root/out-noherdr/run.args" || [[ -e "$root/out-noherdr/herdr.calls" ]]; then
   fail "noherdr: relay set up outside herdr"
 else
   ok "noherdr: no relay outside herdr"
+fi
+
+# kiro (SANDBOX_AGENT=kiro, modules/apps/kiro/kiro-sandbox.nix)
+# K1. The host's ~/.kiro is never mounted writable: the sandbox's own state
+# dirs are, with the host's agents/skills/steering read-only on top and a
+# throwaway settings copy whose mcp.json merges the host's servers with the
+# extra ones. Nothing of Claude's is mounted; kiro-cli gets the arguments
+# untouched (no --mcp-config, no --plugin-dir)
+new_home kiro
+mkdir -p "$home/.kiro/agents" "$home/.kiro/skills" "$home/.kiro/settings" "$home/.kiro/workspace-roots/x"
+echo '{"chat.agentEngine":"v3"}' > "$home/.kiro/settings/cli.json"
+echo '{"mcpServers":{"host":{"command":"h"},"dup":{"command":"old"}}}' > "$home/.kiro/settings/mcp.json"
+echo '{"mcpServers":{"extra":{"command":"/nix/store/x"},"dup":{"command":"new"}}}' > "$root/kiro-extra-mcp.json"
+mkdir -p "$home/.local/share/kiro-cli"
+echo host-db > "$home/.local/share/kiro-cli/data.sqlite3"
+sandbox_agent=kiro extra_mcp="$root/kiro-extra-mcp.json" run_case kiro chat --add-dir /nope
+state="$home/.local/share/kiro-sandbox"
+assert_mount kiro "$state/kiro:$home/.kiro:rw" "kiro: ~/.kiro is the sandbox's own"
+assert_mount kiro "$state/data:$home/.local/share/kiro-cli:rw" "kiro: the kiro-cli data dir is the sandbox's own"
+assert_mount kiro "$home/.kiro/agents:$home/.kiro/agents:ro" "kiro: host agents read-only"
+assert_mount kiro "$home/.kiro/skills:$home/.kiro/skills:ro" "kiro: host skills read-only"
+assert_no_mount kiro "$home/.kiro/steering:$home/.kiro/steering:ro" "kiro: a missing host dir isn't mounted"
+if mounts kiro | grep -qE "^$home/\.kiro(/[^:]*)?:[^:]*:rw\$"; then fail "kiro: a host ~/.kiro path is writable: $(mounts kiro)"; else ok "kiro: no host ~/.kiro path is writable"; fi
+if mounts kiro | grep -qE '/\.claude|claude-code'; then fail "kiro: Claude mounts: $(mounts kiro)"; else ok "kiro: nothing of Claude's is mounted"; fi
+if mounts kiro | grep -qE ":$home/\.kiro/settings:rw\$" && [[ -f "$root/out-kiro/kiro-settings.copy/cli.json" ]]; then
+  ok "kiro: a copy of the host settings is mounted"
+else
+  fail "kiro: no settings copy: $(mounts kiro)"
+fi
+if jq -e '.mcpServers == {host: {command: "h"}, dup: {command: "new"}, extra: {command: "/nix/store/x"}}' "$root/out-kiro/kiro-settings.copy/mcp.json" > /dev/null 2>&1; then
+  ok "kiro: mcp.json merges the host's servers with the extra ones (extra wins)"
+else
+  fail "kiro: mcp.json: $(cat "$root/out-kiro/kiro-settings.copy/mcp.json" 2>&1)"
+fi
+if tail -n 5 "$root/out-kiro/run.args" | tr '\n' ' ' | grep -qF "/nix/store/fake-kiro/bin/kiro-cli chat --trust-all-tools --add-dir /nope "; then
+  ok "kiro: kiro-cli runs with the arguments, trusting all tools"
+else
+  fail "kiro: command: $(tail -n 5 "$root/out-kiro/run.args")"
+fi
+if jq -e '."chat.agentEngine" == "v3" and ."chat.disableTrustAllConfirmation" == true' "$root/out-kiro/kiro-settings.copy/cli.json" > /dev/null 2>&1 \
+  && ! grep -q disableTrustAllConfirmation "$home/.kiro/settings/cli.json"; then
+  ok "kiro: the settings copy (not the host's) skips the trust-all confirmation"
+else
+  fail "kiro: cli.json copy: $(cat "$root/out-kiro/kiro-settings.copy/cli.json" 2>&1)"
+fi
+if grep -qx -- '--name' "$root/out-kiro/run.args" && grep -qE '^kiro-sandbox-.*-kiro$' "$root/out-kiro/run.args"; then
+  ok "kiro: the container is <pod>-kiro in a kiro-sandbox pod"
+else
+  fail "kiro: container name: $(grep -A1 -x -- --name "$root/out-kiro/run.args")"
+fi
+if mounts kiro | grep -q '/etc/claude-code/' || grep -q 'MANAGED_SETTINGS' "$root/out-kiro/stderr"; then fail "kiro: managed settings involved"; else ok "kiro: no managed settings"; fi
+# K2. The host login is copied in once (sqlite .backup), minus conversations
+if [[ "$(cat "$state/data/data.sqlite3" 2>/dev/null)" == copied ]] \
+  && grep -qF "$home/.local/share/kiro-cli/data.sqlite3 .backup '$state/data/data.sqlite3'" "$root/out-kiro/sqlite3.calls" \
+  && grep -qF 'DELETE FROM conversations;' "$root/out-kiro/sqlite3.calls"; then
+  ok "kiro: the host login is copied into the sandbox's data dir"
+else
+  fail "kiro: login copy: $(cat "$root/out-kiro/sqlite3.calls" 2>&1)"
+fi
+sandbox_agent=kiro run_case kiro-again
+if [[ -e "$root/out-kiro-again/sqlite3.calls" ]]; then fail "kiro: the login is copied again"; else ok "kiro: the login is copied only once"; fi
+# K3. SANDBOX_ADD_DIRS mounts read-write (with the clones' git
+# protection) and SANDBOX_RO_PATHS read-only, added to the configured
+# paths; an old agent-named setting gets a warning
+new_home kirodirs
+mkdir -p "$home/ws/repo/.git" "$home/cache" "$home/configured"
+touch "$home/ws/repo/.git/config"
+# shellcheck disable=SC2088 # a literal ~, expanded by the launcher
+SANDBOX_CONFIG_RO_PATHS="$home/configured" SANDBOX_ADD_DIRS="~/ws" SANDBOX_RO_PATHS="$home/cache" \
+  KIRO_SANDBOX_ADD_DIRS="$home/old" sandbox_agent=kiro run_case kirodirs
+assert_mount kirodirs "$home/ws:$home/ws:rw" "kiro: SANDBOX_ADD_DIRS is read-write"
+assert_mount kirodirs "$home/ws/repo/.git/config:$home/ws/repo/.git/config:ro" "kiro: a clone's .git/config in it is read-only"
+assert_mount kirodirs "$home/cache:$home/cache:ro" "kiro: SANDBOX_RO_PATHS is read-only"
+assert_mount kirodirs "$home/configured:$home/configured:ro" "kiro: SANDBOX_RO_PATHS adds to the configured read-only paths"
+if grep -q 'KIRO_SANDBOX_ADD_DIRS is no longer read; use SANDBOX_ADD_DIRS' "$root/out-kirodirs/stderr"; then
+  ok "kiro: an old agent-named setting gets a warning"
+else
+  fail "kiro: no warning for KIRO_SANDBOX_ADD_DIRS: $(cat "$root/out-kirodirs/stderr")"
+fi
+# K3b. SANDBOX_ADD_DIRS mounts for claude too, without becoming an
+# --add-dir of claude's (mounts only)
+new_home claudedirs
+mkdir -p "$home/ws"
+SANDBOX_ADD_DIRS="$home/ws" run_case claudedirs
+assert_mount claudedirs "$home/ws:$home/ws:rw" "claude: SANDBOX_ADD_DIRS is read-write"
+if grep -qx -- "--add-dir=$home/ws" "$root/out-claudedirs/run.args" || grep -qx -- "--add-dir" "$root/out-claudedirs/run.args"; then
+  fail "claude: SANDBOX_ADD_DIRS became an --add-dir"
+else
+  ok "claude: SANDBOX_ADD_DIRS isn't passed to claude"
+fi
+# K4. kiro-sandbox --help describes the kiro sandbox
+sandbox_agent=kiro sandbox_as=kiro-sandbox run_case kirohelp --help
+if grep -q 'SANDBOX_ADD_DIRS' "$root/out-kirohelp/stdout" && [[ ! -e "$root/out-kirohelp/run.args" ]]; then
+  ok "kiro-sandbox --help prints the kiro help"
+else
+  fail "kiro-sandbox --help: $(head -3 "$root/out-kirohelp/stdout")"
+fi
+# K5. Trust all tools: only chats (no arguments starts one) get the flag; a
+# trust flag given wins; SANDBOX_TRUST_ALL=0 passes the arguments as
+# they are
+kiro_cmd() {  # kiro_cmd <case>: what runs in the container after the setup
+  awk -v s=/nix/store/fake-setup 'f { printf "%s ", $0 } $0 == s { f = 1 }' "$root/out-$1/run.args"
+}
+assert_kiro_cmd() {  # assert_kiro_cmd <case> <expected command> <what>
+  if [[ "$(kiro_cmd "$1")" == "$2 " ]]; then ok "$3"; else fail "$3: ran '$(kiro_cmd "$1")'"; fi
+}
+k=/nix/store/fake-kiro/bin/kiro-cli
+new_home kirotrust
+sandbox_agent=kiro run_case kirotrust-none
+assert_kiro_cmd kirotrust-none "$k chat --trust-all-tools" "kiro: no arguments starts a chat trusting all tools"
+sandbox_agent=kiro run_case kirotrust-login login --use-device-flow
+assert_kiro_cmd kirotrust-login "$k login --use-device-flow" "kiro: other subcommands are left alone"
+sandbox_agent=kiro run_case kirotrust-given chat --trust-tools=fs_read --resume
+assert_kiro_cmd kirotrust-given "$k chat --trust-tools=fs_read --resume" "kiro: a trust flag given wins"
+sandbox_agent=kiro run_case kirotrust-a chat -a
+assert_kiro_cmd kirotrust-a "$k chat -a" "kiro: -a isn't doubled"
+sandbox_agent=kiro run_case kirotrust-sep chat -- -a
+assert_kiro_cmd kirotrust-sep "$k chat --trust-all-tools -- -a" "kiro: a -a after -- is the prompt, not a flag"
+SANDBOX_TRUST_ALL=0 sandbox_agent=kiro run_case kirotrust-off chat
+assert_kiro_cmd kirotrust-off "$k chat" "kiro: SANDBOX_TRUST_ALL=0 keeps kiro's prompts"
+if [[ -e "$root/out-kirotrust-off/kiro-settings.copy/cli.json" ]] \
+  && grep -q disableTrustAllConfirmation "$root/out-kirotrust-off/kiro-settings.copy/cli.json"; then
+  fail "kiro: the trust-all confirmation is skipped with SANDBOX_TRUST_ALL=0"
+else
+  ok "kiro: SANDBOX_TRUST_ALL=0 leaves the settings copy alone"
+fi
+run_case kirotrust-claude
+if kiro_cmd kirotrust-claude | grep -q -- --trust-all-tools; then fail "claude: given --trust-all-tools"; else ok "claude: no kiro trust flag"; fi
+# K6. herdr usage rows for kiro: read from the session file kiro-cli writes
+# in the sandbox's ~/.kiro (nothing mounted for it); "usage ERROR" when its
+# records don't read as expected; cleared on exit
+kiro_herdr_case() {  # kiro_herdr_case <case> <session lines>
+  new_home "$1"
+  local h
+  h="$(printf '%s' "$proj" | sha256sum | cut -c1-16)"
+  STUB_KIRO_FILE="$home/.local/share/kiro-sandbox/kiro/sessions/$h/sess_t/messages.jsonl" STUB_KIRO_SESSION="$2" \
+    sandbox_agent=kiro herdr_env=1 herdr_pane=w1:p2 herdr_bin="$stubs/herdr" run_case "$1" chat
+}
+reported() {  # reported <case> <token=value>: some report-metadata call had it
+  grep -qxF -- "$2" "$root/out-$1/herdr.calls" 2>/dev/null
+}
+meta='{"id":"1","payload":{"type":"session_metadata","key":"contextUsage","value":{"usagePercentage":%s}}}\n'
+turn='{"id":"2","payload":{"type":"usage_summary","promptTurnSummaries":[{"unit":"credit","unitPlural":"credits","usage":%s}]}}\n'
+# shellcheck disable=SC2059 # the formats are the records above
+kiro_herdr_case kiroherdr "{\"id\":\"0\",\"payload\":{\"type\":\"other\"}}\n$(printf "$meta" 12)\n$(printf "$turn" 1.5)\n$(printf "$meta" 65.4)\n$(printf "$turn" 2.25)\n"
+if reported kiroherdr 'ctx_warn=ctx 65%' && reported kiroherdr 'credits=3.75 credits' && reported kiroherdr 'kiro-usage' \
+  && reported kiroherdr 'w1:p2'; then
+  ok "kiro herdr: the context used and the session's credits are reported"
+else
+  fail "kiro herdr: calls: $(cat "$root/out-kiroherdr/herdr.calls" 2>/dev/null)"
+fi
+if grep -q SANDBOX_HERDR_DIR "$root/out-kiroherdr/run.args"; then fail "kiro herdr: a usage dir is mounted"; else ok "kiro herdr: nothing is mounted for it"; fi
+if [[ "$(sed -n '/^--token$/{n;p}' "$root/out-kiroherdr/herdr.calls" 2>/dev/null | tail -5 | grep -c '=$')" == 5 ]]; then
+  ok "kiro herdr: the pane's usage rows are cleared on exit"
+else
+  fail "kiro herdr: calls: $(cat "$root/out-kiroherdr/herdr.calls" 2>/dev/null)"
+fi
+# shellcheck disable=SC2059
+kiro_herdr_case kiroherdrhot "$(printf "$meta" 85)\n"
+if reported kiroherdrhot 'ctx_hot=ctx 85%' && reported kiroherdrhot 'credits=' && reported kiroherdrhot 'usage_error='; then
+  ok "kiro herdr: from 80% the context is hot; no credits before a turn ends"
+else
+  fail "kiro herdr hot: calls: $(cat "$root/out-kiroherdrhot/herdr.calls" 2>/dev/null)"
+fi
+# shellcheck disable=SC2059
+kiro_herdr_case kiroherdrbad "$(printf "$meta" '"x"')\n"
+if reported kiroherdrbad 'usage_error=usage ERROR' && ! reported kiroherdrbad 'ctx_ok=ctx' \
+  && grep -q 'warning: kiro usage: .*contextUsage has no numeric usagePercentage' "$root/state/kiro-sandbox.log"; then
+  ok "kiro herdr: a changed record shows usage ERROR, the reason in the launch log"
+else
+  fail "kiro herdr bad: calls: $(cat "$root/out-kiroherdrbad/herdr.calls" 2>/dev/null)"
+fi
+kiro_herdr_case kiroherdrjson '{"payload":{"type":"usage_summary", not json\n'
+if reported kiroherdrjson 'usage_error=usage ERROR'; then
+  ok "kiro herdr: records that aren't JSON show usage ERROR"
+else
+  fail "kiro herdr json: calls: $(cat "$root/out-kiroherdrjson/herdr.calls" 2>/dev/null)"
+fi
+# shellcheck disable=SC2059
+kiro_herdr_case kiroherdrunit "$(printf "$meta" 10)\n{\"payload\":{\"type\":\"usage_summary\",\"promptTurnSummaries\":[{\"unit\":\"token\",\"usage\":5}]}}\n"
+if reported kiroherdrunit 'usage_error=usage ERROR'; then
+  ok "kiro herdr: turn summaries without credits show usage ERROR"
+else
+  fail "kiro herdr unit: calls: $(cat "$root/out-kiroherdrunit/herdr.calls" 2>/dev/null)"
+fi
+new_home kironoherdr
+sandbox_agent=kiro herdr_bin="$stubs/herdr" run_case kironoherdr chat
+if [[ -e "$root/out-kironoherdr/herdr.calls" ]]; then fail "kiro: relay outside herdr"; else ok "kiro: no relay outside herdr"; fi
+
+# P1. An agent profile (AGENT_HOME, set by the wrapper from AGENT): claude's
+# config dir is the profile home, mounted read-write with CLAUDE_CONFIG_DIR;
+# ~/.claude isn't mounted
+new_home profclaude
+ph="$home/.config/agents/homes/work-claude"
+mkdir -p "$ph/skills" "$home/.claude"
+echo '{"permissions":{"deny":["Bash(rm -rf:*)"]}}' > "$ph/settings.json"
+AGENT_HOME="$ph" AGENT_PROFILE=work-claude run_case profclaude
+assert_mount profclaude "$ph:$ph:rw" "profile: claude's home is the profile's"
+assert_mount profclaude "$ph/.claude.json:$ph/.claude.json:rw" "profile: .claude.json is in the profile home"
+assert_mount profclaude "$ph/skills:$ph/skills:ro" "profile: its skills are read-only"
+if mounts profclaude | grep -q ":$ph/settings.json:ro\$"; then ok "profile: its settings are read-only"; else fail "profile settings: $(mounts profclaude)"; fi
+assert_no_mount profclaude "$home/.claude:$home/.claude:rw" "profile: ~/.claude isn't mounted"
+if grep -qx "CLAUDE_CONFIG_DIR=$ph" "$root/out-profclaude/run.args" && grep -qx "claude-sandbox.profile=work-claude" "$root/out-profclaude/run.args"; then
+  ok "profile: CLAUDE_CONFIG_DIR and the pod's profile label are set"
+else
+  fail "profile env: $(grep -E 'CLAUDE_CONFIG_DIR|profile' "$root/out-profclaude/run.args")"
+fi
+# P2. kiro: the profile home's config (read-only) and login, its sandbox
+# state in <home>/.sandbox
+new_home profkiro
+ph="$home/.config/agents/homes/work-kiro"
+mkdir -p "$ph/agents" "$ph/settings" "$ph/.data/kiro-cli" "$home/.kiro/skills"
+echo '{"mcpServers":{"mine":{"command":"m"}}}' > "$ph/settings/mcp.json"
+echo db > "$ph/.data/kiro-cli/data.sqlite3"
+AGENT_HOME="$ph" AGENT_PROFILE=work-kiro sandbox_agent=kiro run_case profkiro chat
+assert_mount profkiro "$ph/.sandbox/kiro:$home/.kiro:rw" "profile kiro: its sandbox ~/.kiro is in the profile home"
+assert_mount profkiro "$ph/.sandbox/data:$home/.local/share/kiro-cli:rw" "profile kiro: its sandbox data dir too"
+assert_mount profkiro "$ph/agents:$home/.kiro/agents:ro" "profile kiro: the profile's agents, read-only"
+assert_no_mount profkiro "$home/.kiro/skills:$home/.kiro/skills:ro" "profile kiro: ~/.kiro isn't used"
+if jq -e '.mcpServers.mine' "$root/out-profkiro/kiro-settings.copy/mcp.json" >/dev/null 2>&1 \
+  && grep -qF "$ph/.data/kiro-cli/data.sqlite3 .backup '$ph/.sandbox/data/data.sqlite3'" "$root/out-profkiro/sqlite3.calls"; then
+  ok "profile kiro: the profile's MCP servers and login are used"
+else
+  fail "profile kiro: $(cat "$root/out-profkiro/sqlite3.calls" 2>&1)"
 fi
 
 if (( failures > 0 )); then

@@ -13,8 +13,8 @@ The home module writes `~/.config/herdr/config.toml` (read-only, Nix-owned):
 - **Notifications**: `ui.toast.delivery = "system"`. herdr sends a desktop
   notification (`notify-send`) when an agent finishes or needs you in a pane
   you're not looking at. It is the only Claude notifier; Claude Code's own
-  terminal notifications are off, and so are claude-tickets' sticky
-  `notify-send` pings (`CLAUDE_TICKETS_NOTIFY=0` in Claude's settings `env`,
+  terminal notifications are off, and so are tix's sticky
+  `notify-send` pings (`TIX_NOTIFY=0` in Claude's settings `env`,
   `claude-code.nix`).
 - **Agent detection**: herdr recognises Claude from a pane's processes. The
   sandbox launcher runs its script as `claude` (`exec -a`) so sandboxed sessions
@@ -40,6 +40,19 @@ The home module writes `~/.config/herdr/config.toml` (read-only, Nix-owned):
   sandbox drive every pane), so it writes the tokens to a file in a directory
   mounted from the host, and the launcher, running in the herdr pane, reports
   them every 2s and clears them when the session ends.
+- **kiro usage rows**: kiro has no status line command, so for sandboxed kiro
+  sessions the launcher reads what kiro-cli's v3 engine records in the
+  sandbox's `~/.kiro` (a host directory,
+  `~/.local/share/kiro-sandbox/kiro/sessions/<sha256(cwd):16>/sess_*/messages.jsonl`):
+  the last `contextUsage` percentage (`ctx_ok`, `ctx_warn` from 60% in yellow,
+  `ctx_hot` from 80% in red) and the session's credits (the `usage_summary`
+  turn records). These files are kiro's internals, not an interface: when they
+  stop reading as expected (a record without its numbers, lines that aren't
+  JSON, a long session without `contextUsage`, a session index pointing at no
+  folder), the only row is `usage ERROR` in red (`usage_error`), and the
+  reason is a warning in `~/.local/state/kiro-sandbox.log`. The plan's
+  monthly credit allowance isn't on disk (only `/usage` asks the service), so
+  there is no limit row. `kiro-open` sessions get no rows.
 - **Startup screens off**: `onboarding = false` (herdr can't record it in a
   read-only file), and `update.version_check`/`manifest_check` off, which also
   stops announcements and release notes. Updates come from nixpkgs.

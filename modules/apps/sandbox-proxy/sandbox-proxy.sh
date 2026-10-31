@@ -298,7 +298,7 @@ cmd_start() {
     usage
     exit 1
   fi
-  # Sandboxes launched together (ct start A B C) start in parallel; one
+  # Sandboxes launched together (tix start A B C) start in parallel; one
   # at a time checks and, if needed, (re)creates the shared containers.
   # The lock must be released explicitly: podman's conmon (and anything else
   # started here) inherits fd 8 and outlives this script, so merely exiting

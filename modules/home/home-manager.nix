@@ -20,7 +20,7 @@
         imports = [
           self.homeModules.desktopHome
           self.homeModules.noctalia
-          inputs.claude-tickets.homeModules.obsidianVaults
+          inputs.tix.homeModules.obsidianVaults
           self.homeModules.vicinaeConfig
           self.homeModules.terminals
           self.homeModules.browsers
@@ -32,12 +32,14 @@
           self.homeModules.zed
           self.homeModules.claudeCode
           self.homeModules.claudeSandbox
+          self.homeModules.kiroSandbox
+          self.homeModules.agents
           self.homeModules.npmSandbox
           self.homeModules.sandboxProxy
           self.homeModules.gitSshBroker
           self.homeModules.aiSandboxSlice
-          inputs.claude-tickets.homeModules.claudeTickets
-          self.homeModules.claudeTicketsSetup
+          inputs.tix.homeModules.tix
+          self.homeModules.tixSetup
         ];
       };
     };

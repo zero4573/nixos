@@ -8,7 +8,10 @@ branches or local changes are reported and left alone.
 
 The module is `modules/apps/claude/claude-sandbox.nix` (a home-manager module,
 `programs.claudeSandbox.*`); the launcher is `claude-sandbox.sh`. `claude-sandbox
---help` documents every setting.
+--help` documents every setting. The same launcher runs kiro-cli with
+`SANDBOX_AGENT=kiro` ([kiro-sandbox](./kiro-sandbox.md)); the Claude-only parts
+(argument parsing, settings and deny rules, managed settings, `~/.claude`, the
+herdr usage relay) are guarded by that variable.
 
 ## Launch
 
@@ -38,16 +41,41 @@ sequenceDiagram
 Each step is timestamped on stderr and appended to
 `~/.local/state/claude-sandbox.log`, so a stuck launch shows where it is.
 
+## Settings
+
+The sandbox's own settings are environment variables, the same `SANDBOX_*` for
+every agent (claude-sandbox and [kiro-sandbox](./kiro-sandbox.md)); the old
+`CLAUDE_SANDBOX_*` / `KIRO_SANDBOX_*` names are no longer read and get a
+warning. Lists given in the environment add to the configured ones.
+
+| Variable | Effect |
+|---|---|
+| `SANDBOX_PORTS=3000,5173` | publish these ports on the same host ports |
+| `SANDBOX_NAME=<label>` | pod `<agent>-sandbox-<label>` instead of `<repo>-<folder>` |
+| `SANDBOX_QUIET=1` | only warnings while launching |
+| `SANDBOX_PASS_ENV="A_* B"` | more host variables to pass in (name globs), added to `programs.<agent>Sandbox.passEnv` |
+| `SANDBOX_ADD_DIRS=/a:~/b` | more read-write directories; mounts only, the agent isn't told (tix sets it for the vault's sessions) |
+| `SANDBOX_RO_PATHS=/a:~/b` | more read-only paths, added to `programs.<agent>Sandbox.readOnlyPaths` (tix adds the model cache) |
+| `SANDBOX_NIX_DAEMON=1` | mount the nix-daemon socket when its trust can't be told |
+| `SANDBOX_TRUST_ALL=0` | kiro chats ask before running tools (claude: no effect) |
+
 ## Mounts
 
 What the session can touch follows Claude's own settings, not sandbox flags:
 
-- read-write: the working directory and every `--add-dir` directory (also
-  `permissions.additionalDirectories` from user, project and `--settings`);
+- read-write: the working directory, every `--add-dir` directory (also
+  `permissions.additionalDirectories` from user, project and `--settings`), and
+  every `SANDBOX_ADD_DIRS` directory (mounted only: Claude isn't given those);
 - read-only: paths of `Edit(...)` / `Write(...)` deny rules that lie inside a
   read-write directory (the most specific path wins), files named by
   `--settings`, `--mcp-config`, `--plugin-dir` and `--*system-prompt-file`, and
-  `programs.claudeSandbox.readOnlyPaths`;
+  `programs.claudeSandbox.readOnlyPaths` plus `SANDBOX_RO_PATHS`;
+- every path is mounted once, however many times it is given (`--add-dir`,
+  `SANDBOX_ADD_DIRS`, settings); read-only wins: a path given both ways is
+  read-only (the project too), and a read-only path around a read-write
+  directory leaves that more specific directory writable;
+- with an agent profile (`AGENT=<profile>`, [agents](./agents.md)) the
+  profile's home takes `~/.claude`'s place, as `CLAUDE_CONFIG_DIR`;
 - a deny rule with a `*` component (`a/*/*/*`, one clone per match) also makes the
   directory before the first whole-component `*` read-only, so a session
   can't create files at the levels in between or write into a clone made after
@@ -91,7 +119,7 @@ flowchart TD
     q["nix store info --json"] --> t{"trusted?"}
     t -->|"no"| mount["mount the socket"]
     t -->|"yes (root-equivalent)"| skip["skip, warn"]
-    t -->|"unknown"| env{"CLAUDE_SANDBOX_NIX_DAEMON=1?"}
+    t -->|"unknown"| env{"SANDBOX_NIX_DAEMON=1?"}
     env -->|"yes"| mount
     env -->|"no (fails closed)"| skip
 ```

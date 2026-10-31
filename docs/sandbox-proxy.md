@@ -7,8 +7,8 @@ get credential-free URLs on host-local podman networks.
 
 | Service | Network | Joined by | Containers |
 | --- | --- | --- | --- |
-| package registries | `sandbox-registry` | claude-sandbox, npm-sandbox | registry-proxy (caddy), registry-cache (docker pull-through), npm-proxy (Verdaccio) |
-| MCP servers | `sandbox-mcp` | claude-sandbox only | mcp-proxy (caddy) |
+| package registries | `sandbox-registry` | claude-sandbox, kiro-sandbox, npm-sandbox | registry-proxy (caddy), registry-cache (docker pull-through), npm-proxy (Verdaccio) |
+| MCP servers | `sandbox-mcp` | claude-sandbox and kiro-sandbox only | mcp-proxy (caddy) |
 
 npm-sandbox runs untrusted install scripts, so it never joins `sandbox-mcp`: a
 proxy that acts as you against Jira or Bitbucket must not be reachable from it.
@@ -64,7 +64,7 @@ after rotating a credential.
   `http://mcp-proxy:8080/<name>` and injects the `Authorization` header. The same
   routes are published on host loopback (`host-mcp-config`) for host tools that
   talk to the servers without a model.
-- Anything inside a claude-sandbox can call the MCP proxy as you, so each token's
+- Anything inside a claude-sandbox or kiro-sandbox can call the MCP proxy as you, so each token's
   scopes are the real limit: keep them read-only. `sandbox-proxy.nix` documents the
   Atlassian (Rovo) token setup.
 - The npm cache keeps every tarball fetched; `sandbox-proxy prune [--days N]` (default 60) drops

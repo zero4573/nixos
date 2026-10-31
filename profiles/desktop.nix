@@ -22,7 +22,7 @@
       self.nixosModules.dev
       self.nixosModules.containers
       self.nixosModules.joplin
-      inputs.claude-tickets.nixosModules.obsidian
+      inputs.tix.nixosModules.obsidian
       self.nixosModules.sublimeMerge
       self.nixosModules.calibre
       self.nixosModules.screenshot

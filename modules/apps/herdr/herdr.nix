@@ -101,6 +101,21 @@
           ]
           [ { token = "$reset"; dim = true; } ]
         ];
+        # kiro panes (sandboxed: claude-sandbox.sh reads the usage kiro-cli
+        # records in the sandbox's ~/.kiro) get the context window used
+        # (yellow from 60%, red from 80%) and the session's credits; when
+        # kiro's records no longer read as expected, "usage ERROR" in red
+        ui.sidebar.agents.rows_by_agent.kiro = [
+          [ "state_icon" "machine" "workspace" "tab" ]
+          [ "agent" ]
+          [
+            "$ctx_ok"
+            { token = "$ctx_warn"; fg = "#e5c07b"; }
+            { token = "$ctx_hot"; fg = "#e06c75"; bold = true; }
+          ]
+          [ { token = "$credits"; dim = true; } ]
+          [ { token = "$usage_error"; fg = "#e06c75"; bold = true; } ]
+        ];
         keys.command = [
           {
             key = "prefix+a";
