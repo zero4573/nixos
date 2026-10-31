@@ -17,7 +17,8 @@ _: {
   #       about profiles. Without AGENT (or with another agent's profile) a
   #       wrapper takes its agent's "defaults" entry; nothing is guessed:
   #       with none, it runs agent-configure --agent (in a terminal) or
-  #       fails. AGENT=none is the usual ~/.claude / ~/.kiro.
+  #       fails. Every run is on a profile (one may have ~/.claude or
+  #       ~/.kiro as its home).
   #
   #  The profiles file (~/.config/agents/profiles.json) is yours, written by
   #  agent-configure, not by Nix. A profile's home is CLAUDE_CONFIG_DIR for

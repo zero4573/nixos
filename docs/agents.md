@@ -44,12 +44,14 @@ CLI's own commands (`claude`, `kiro`, ...) use.
 `claude`, `kiro`, `claude-open` and `kiro-open` resolve the profile themselves,
 and only take a profile of their own agent:
 
-1. `AGENT=none`: the CLI's usual home (`~/.claude`, `~/.kiro`)
-2. `AGENT=<profile>` of their agent: that profile
-3. otherwise (no `AGENT`, or another agent's profile): `defaults.<agent>`
-4. none set: `agent-configure --agent <agent>` asks you to choose or add one and
+1. `AGENT=<profile>` of their agent: that profile
+2. otherwise (no `AGENT`, or another agent's profile): `defaults.<agent>`
+3. none set: `agent-configure --agent <agent>` asks you to choose or add one and
    keeps the answer (in a terminal; otherwise the command fails and says to run
    it). Nothing is guessed, not even when the agent has only one profile.
+
+Every run is on a profile: there is no way back to the CLI's usual home. To keep
+using `~/.claude` or `~/.kiro`, add a profile with that home.
 
 That is why tix needs nothing of its own here: it keeps starting the CLI it
 needs (`claude` or `kiro`, each with its CLI-specific setup), and

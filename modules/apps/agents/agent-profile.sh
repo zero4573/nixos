@@ -14,9 +14,9 @@
 # account AGENT names. Without AGENT, or with AGENT naming another agent's
 # profile, a wrapper uses defaults.<agent>; nothing is guessed: with none
 # set, it runs agent-configure --agent <agent> (in a terminal) to choose or
-# add one, and fails otherwise. AGENT=none is the CLI's usual home
-# (~/.claude, ~/.kiro). "default" is what agent / agent-open run without
-# AGENT.
+# add one, and fails otherwise. Every run is on a profile: there is no way
+# back to the CLI's usual home (~/.claude, ~/.kiro) except a profile whose
+# home it is. "default" is what agent / agent-open run without AGENT.
 
 agents_config() { printf '%s' "${AGENTS_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agents/profiles.json}"; }
 
@@ -69,12 +69,11 @@ agent_default() {
 # created if missing) for the profile of <agent> to use: AGENT when it
 # names one of <agent>, else defaults.<agent>; with neither, agent-configure
 # --agent <agent> chooses or adds one (AGENT_CONFIGURE, in a terminal), else
-# it fails. AGENT=none: nothing (the CLI's usual home). Fails, with a
-# message, for a name that isn't a profile or a bad home.
+# it fails. Fails, with a message, for a name that isn't a profile or a bad
+# home.
 agent_profile() {
   local want="$1" name="${AGENT:-}" agent home
   unset AGENT_PROFILE AGENT_HOME
-  [[ "$name" == none ]] && return 0
   if [[ -n "$name" ]]; then
     if ! agents_valid_name "$name"; then
       echo "agents: AGENT=$name isn't a profile name" >&2
@@ -99,7 +98,7 @@ agent_profile() {
     name="$(agent_default "$want")" || return 1
   fi
   if [[ -z "$name" ]]; then
-    echo "agents: no $want profile chosen for when AGENT isn't set: run agent-configure --agent $want, or set AGENT=<profile> (AGENT=none: the usual home)" >&2
+    echo "agents: no $want profile chosen for when AGENT isn't set: run agent-configure --agent $want, or set AGENT=<profile>" >&2
     return 1
   fi
   home="$(agents_expand "$(agents_field "$name" home)")" || return 1

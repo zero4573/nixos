@@ -33,8 +33,8 @@ Usage: agent-configure                      add a profile (asks for each value)
 Profiles are in $file. A profile is a name (AGENT=<name> picks it), an agent
 (claude or kiro) and a home directory for that account's config and login
 (default $homes/<name>). Without AGENT, claude and kiro use their agent's
-default profile; with none, they run agent-configure --agent first.
-AGENT=none uses the CLI's usual home (~/.claude, ~/.kiro).
+default profile; with none, they run agent-configure --agent first. To use
+~/.claude or ~/.kiro, add a profile with that home.
 EOF
 }
 

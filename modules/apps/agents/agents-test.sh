@@ -136,7 +136,7 @@ fi
 # account): AGENT of their own agent picks the home; without AGENT, or with
 # another agent's profile, their agent's "defaults" entry; nothing guessed:
 # with none, agent-configure --agent in a terminal, else a failure;
-# AGENT=none the usual home. Here defaults: claude personal, kiro work-kiro.
+# AGENT=none is no profile. Here defaults: claude personal, kiro work-kiro.
 "$bin/stub-claude-sandbox"
 if grep -qx "AGENT_HOME=$p" "$OUT" && grep -qx 'AGENT_PROFILE=personal' "$OUT"; then
   ok "wrapper: no AGENT, its agent's default"
@@ -161,11 +161,17 @@ if grep -qx "AGENT_HOME=$p" "$OUT" && grep -qx 'AGENT_PROFILE=personal' "$OUT"; 
 else
   fail "wrapper own agent: $(cat "$OUT")"
 fi
-AGENT=none AGENT_HOME=/stale "$bin/stub-claude-open"
-if grep -qx 'AGENT_HOME=' "$OUT"; then
-  ok "wrapper: AGENT=none, the usual home (a stale AGENT_HOME is dropped)"
+AGENT_HOME=/stale "$bin/stub-claude-open"
+if grep -qx "AGENT_HOME=$p" "$OUT"; then
+  ok "wrapper: a stale AGENT_HOME in the environment is replaced"
 else
-  fail "wrapper none: $(cat "$OUT")"
+  fail "wrapper stale: $(cat "$OUT")"
+fi
+rm -f "$OUT"
+if ! AGENT=none "$bin/stub-claude-open" </dev/null 2>"$root/err" && [[ ! -e "$OUT" ]] && grep -q "no profile 'none'" "$root/err"; then
+  ok "wrapper: AGENT=none isn't a way back to the usual home"
+else
+  fail "wrapper none: $(cat "$root/err")"
 fi
 # no kiro default, no terminal: it fails and says what to run (no guess,
 # though work-kiro is the only kiro profile)
