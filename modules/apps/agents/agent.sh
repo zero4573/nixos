@@ -1,8 +1,8 @@
 # agent / agent-open: run the agent of an account (agent-profile.sh), the
 # sandboxed or the open wrapper of its CLI (claude, kiro / claude-open,
 # kiro-open), with AGENT set to the profile so the wrapper uses its home.
-# The profile is $AGENT, else the file's default, else its only one. With no
-# profiles yet, agent-configure sets one up first.
+# The profile is $AGENT, else the file's default; with neither (no profiles
+# yet, or no default), agent-configure adds or chooses one first.
 #
 # Set by the Nix wrapper: AGENTS_MODE (sandbox | open), AGENT_CONFIGURE (the
 # agent-configure command), AGENT_CMD_<agent>_<mode> (each wrapper).
@@ -18,11 +18,12 @@ Usage: [AGENT=<profile>] $cmd_name [agent args...]
 Runs the agent of a profile (an account: agent + home directory, listed in
 $(agents_config)) $( [[ "$mode" == open ]] && echo "unsandboxed (claude-open, kiro-open)" || echo "in its sandbox (claude, kiro)" ),
 with every argument passed to it. The profile is \$AGENT, else the file's
-"default", else its only profile. With none yet, agent-configure sets one up.
+"default"; with neither, agent-configure adds or chooses one first.
 
-  agent-configure           add a profile
-  agent-configure --list    list them
-  agent-configure --default <profile>
+  agent-configure                      add a profile
+  agent-configure --list               list them
+  agent-configure --default [<profile>]
+  agent-configure --agent claude|kiro  what claude / kiro use without AGENT
 EOF
   exit 0
 fi
@@ -34,26 +35,30 @@ profiles() {
   jq -r '.profiles // {} | keys[]' "$f" 2>/dev/null
 }
 
-if [[ -z "$(profiles)" ]]; then
-  if [[ -t 0 ]]; then
-    echo "$cmd_name: no agent profiles yet; setting one up" >&2
-    "$AGENT_CONFIGURE" || exit 1
-  else
-    echo "$cmd_name: no agent profiles in $(agents_config); run agent-configure" >&2
-    exit 1
-  fi
-fi
+default() {
+  local n
+  n="$(jq -r '.default // "" | strings' "$(agents_config)" 2>/dev/null || true)"
+  [[ -n "$n" && -n "$(agents_field "$n" agent 2>/dev/null)" ]] && printf '%s' "$n"
+  return 0
+}
 
 name="${AGENT:-}"
+[[ -n "$name" ]] || name="$(default)"
+# Nothing is guessed: with no profiles yet, or no default, agent-configure
+# adds one or chooses the default (in a terminal)
 if [[ -z "$name" ]]; then
-  name="$(jq -r '.default // "" | strings' "$(agents_config)" 2>/dev/null || true)"
-fi
-if [[ -z "$name" ]]; then
-  mapfile -t all < <(profiles)
-  if (( ${#all[@]} == 1 )); then
-    name="${all[0]}"
-  else
-    echo "$cmd_name: set AGENT to one of: ${all[*]} (or a default: agent-configure --default <profile>)" >&2
+  if [[ -t 0 ]]; then
+    if [[ -z "$(profiles)" ]]; then
+      echo "$cmd_name: no agent profiles yet; setting one up" >&2
+      "$AGENT_CONFIGURE" || exit 1
+    else
+      echo "$cmd_name: no default profile; choose one" >&2
+      "$AGENT_CONFIGURE" --default || exit 1
+    fi
+    name="$(default)"
+  fi
+  if [[ -z "$name" ]]; then
+    echo "$cmd_name: no default profile in $(agents_config): run agent-configure (--default), or set AGENT=<profile>" >&2
     exit 1
   fi
 fi

@@ -31,6 +31,10 @@ for a in claude kiro; do
     {
       printf '#!%s\nset -euo pipefail\n' "$BASH"
       cat "$src/agent-profile.sh"
+      # a terminal only when the case says so (STUB_TTY=1)
+      # shellcheck disable=SC2016 # the stub's own variable, expanded when it runs
+      printf 'agents_interactive() { [[ "${STUB_TTY:-}" == 1 ]]; }\n'
+      printf 'export AGENT_CONFIGURE=%q\n' "$bin/agent-configure"
       printf 'agent_profile %s\n' "$a"
       # shellcheck disable=SC2016 # the stub's own variables, expanded when it runs
       printf 'printf "%%s\\n" "%s-%s" "AGENT=${AGENT:-}" "AGENT_PROFILE=${AGENT_PROFILE:-}" "AGENT_HOME=${AGENT_HOME:-}" "$@" > "$OUT"\n' "$a" "$m"
@@ -63,8 +67,8 @@ fi
 # 2. agent-configure adds a first profile (the default) with the defaults
 printf 'work-kiro\n\n\n' | "$bin/agent-configure" 2>"$root/err" || fail "configure work-kiro: $(cat "$root/err")"
 h="$HOME/.config/agents/homes/work-kiro"
-if jq -e '.default == "work-kiro" and .profiles["work-kiro"] == {agent: "kiro", home: "~/.config/agents/homes/work-kiro"}' "$cfg" >/dev/null; then
-  ok "configure: the first profile, agent guessed from its name, home under the homes dir, the default"
+if jq -e '.default == "work-kiro" and .defaults == {kiro: "work-kiro"} and .profiles["work-kiro"] == {agent: "kiro", home: "~/.config/agents/homes/work-kiro"}' "$cfg" >/dev/null; then
+  ok "configure: the first profile, agent guessed from its name, home under the homes dir, the default and kiro's"
 else
   fail "configure: $(cat "$cfg")"
 fi
@@ -75,10 +79,11 @@ else
   fail "configure kiro home: $(ls -la "$h")"
 fi
 
-# 3. A second claude profile with its own home, not the default
+# 3. A second, claude profile with its own home: claude's default (it has
+# none yet), not agent's (asked: no)
 printf 'personal\nclaude\n~/accounts/personal\nn\n' | "$bin/agent-configure" 2>"$root/err" || fail "configure personal: $(cat "$root/err")"
 p="$HOME/accounts/personal"
-if jq -e '.default == "work-kiro" and .profiles.personal == {agent: "claude", home: "~/accounts/personal"}' "$cfg" >/dev/null \
+if jq -e '.default == "work-kiro" and .defaults == {kiro: "work-kiro", claude: "personal"} and .profiles.personal == {agent: "claude", home: "~/accounts/personal"}' "$cfg" >/dev/null \
   && [[ -f "$p/settings.json" && ! -L "$p/settings.json" && -d "$p/skills/s" ]]; then
   ok "configure: a claude profile gets copies of ~/.claude's settings and skills"
 else
@@ -94,8 +99,8 @@ else
   fail "configure refusals: $(cat "$cfg")"
 fi
 "$bin/agent-configure" --list > "$root/list"
-if grep -qE '^\* +work-kiro +kiro' "$root/list" && grep -qE '^ +personal +claude' "$root/list"; then
-  ok "configure --list marks the default"
+if grep -qE '^\*\+ +work-kiro +kiro' "$root/list" && grep -qE '^ \+ +personal +claude' "$root/list"; then
+  ok "configure --list marks agent's default and each agent's"
 else
   fail "list: $(cat "$root/list")"
 fi
@@ -129,23 +134,23 @@ fi
 
 # 5. The wrappers themselves (how tix, which runs claude or kiro, gets the
 # account): AGENT of their own agent picks the home; without AGENT, or with
-# another agent's profile, their agent's default (the file's default when
-# it is theirs, else their only profile, else the usual home); AGENT=none
-# the usual home. The default is personal (claude) here.
+# another agent's profile, their agent's "defaults" entry; nothing guessed:
+# with none, agent-configure --agent in a terminal, else a failure;
+# AGENT=none the usual home. Here defaults: claude personal, kiro work-kiro.
 "$bin/stub-claude-sandbox"
 if grep -qx "AGENT_HOME=$p" "$OUT" && grep -qx 'AGENT_PROFILE=personal' "$OUT"; then
-  ok "wrapper: no AGENT, the default profile when it is the wrapper's agent"
+  ok "wrapper: no AGENT, its agent's default"
 else
   fail "wrapper default: $(cat "$OUT")"
 fi
 "$bin/stub-kiro-open"
 if grep -qx "AGENT_HOME=$h" "$OUT"; then
-  ok "wrapper: no AGENT and a default of the other agent, its agent's only profile"
+  ok "wrapper: kiro's own default, whatever agent / agent-open's is"
 else
-  fail "wrapper only profile: $(cat "$OUT")"
+  fail "wrapper kiro default: $(cat "$OUT")"
 fi
 AGENT=work-kiro "$bin/stub-claude-sandbox" 2>"$root/err"
-if grep -qx "AGENT_HOME=$p" "$OUT" && grep -q 'is a kiro profile; claude uses personal' "$root/err"; then
+if grep -qx "AGENT_HOME=$p" "$OUT" && grep -q 'is a kiro profile; claude uses its own default' "$root/err"; then
   ok "wrapper: a profile of the other agent gives its own agent's default"
 else
   fail "wrapper other agent: $(cat "$OUT" "$root/err")"
@@ -162,12 +167,50 @@ if grep -qx 'AGENT_HOME=' "$OUT"; then
 else
   fail "wrapper none: $(cat "$OUT")"
 fi
-printf 'other-kiro\nkiro\n\nn\n' | "$bin/agent-configure" 2>/dev/null
-"$bin/stub-kiro-open"
-if grep -qx 'AGENT_HOME=' "$OUT"; then
-  ok "wrapper: no AGENT, two profiles of its agent and a default of the other: the usual home"
+# no kiro default, no terminal: it fails and says what to run (no guess,
+# though work-kiro is the only kiro profile)
+jq 'del(.defaults.kiro)' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+rm -f "$OUT"
+if ! "$bin/stub-kiro-open" </dev/null 2>"$root/err" && [[ ! -e "$OUT" ]] && grep -q 'run agent-configure --agent kiro' "$root/err"; then
+  ok "wrapper: no default for its agent and no terminal: fails, naming agent-configure --agent"
 else
-  fail "wrapper two profiles: $(cat "$OUT")"
+  fail "wrapper no default: $(cat "$root/err")"
+fi
+# in a terminal it runs agent-configure --agent kiro: choose a profile...
+printf '1\n' | STUB_TTY=1 "$bin/stub-kiro-open" 2>"$root/err"
+if grep -qx "AGENT_HOME=$h" "$OUT" && jq -e '.defaults.kiro == "work-kiro"' "$cfg" >/dev/null && grep -q '1) work-kiro' "$root/err"; then
+  ok "wrapper: no default in a terminal: agent-configure --agent lists its profiles, the chosen one is used and kept"
+else
+  fail "wrapper choose: $(cat "$OUT" "$root/err")"
+fi
+# ...or add one (its agent's default; not asked which agent)
+jq 'del(.defaults.kiro)' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+printf 'n\nother-kiro\n\nn\n' | STUB_TTY=1 "$bin/stub-kiro-open" 2>"$root/err"
+o="$HOME/.config/agents/homes/other-kiro"
+if grep -qx "AGENT_HOME=$o" "$OUT" && jq -e '.defaults.kiro == "other-kiro" and .profiles["other-kiro"].agent == "kiro" and .default == "personal"' "$cfg" >/dev/null; then
+  ok "wrapper: or adds a profile of its agent, which becomes its default"
+else
+  fail "wrapper add: $(cat "$OUT" "$root/err"; cat "$cfg")"
+fi
+# a default naming another agent's profile isn't used
+jq '.defaults.claude = "work-kiro"' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+if ! "$bin/stub-claude-open" </dev/null 2>"$root/err" && grep -q "defaults.claude .* names 'work-kiro', which isn't a claude profile" "$root/err"; then
+  ok "wrapper: a default of the wrong agent is reported, not used"
+else
+  fail "wrapper wrong default: $(cat "$root/err")"
+fi
+"$bin/agent-configure" --agent claude <<< 1 2>/dev/null
+if jq -e '.defaults.claude == "personal"' "$cfg" >/dev/null; then
+  ok "configure --agent claude chooses claude's default"
+else
+  fail "configure --agent: $(cat "$cfg")"
+fi
+# agent / agent-open: no default and no terminal: fails (no guess)
+jq 'del(.default)' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+if ! "$bin/agent" </dev/null 2>"$root/err" && grep -q 'no default profile' "$root/err"; then
+  ok "agent: no default and no terminal: fails, naming agent-configure"
+else
+  fail "agent no default: $(cat "$root/err")"
 fi
 if ! AGENT=nope "$bin/stub-kiro-open" 2>/dev/null; then ok "wrapper: an unknown profile fails"; else fail "wrapper: unknown profile ran"; fi
 echo 'not json' > "$cfg"

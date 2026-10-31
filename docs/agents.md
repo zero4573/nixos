@@ -9,14 +9,16 @@ login, picked with `AGENT=<profile>`. The module is
 
 | Command | What it does |
 |---|---|
-| `agent-configure` | adds a profile, asking for its name, agent (`claude`/`kiro`, guessed from the name) and home (default `~/.config/agents/homes/<name>`, `programs.agents.homesDir`); the first one becomes the default |
-| `agent-configure --list` / `--default <profile>` | lists the profiles (`*` marks the default) / sets the default |
+| `agent-configure` | adds a profile, asking for its name, agent (`claude`/`kiro`, guessed from the name) and home (default `~/.config/agents/homes/<name>`, `programs.agents.homesDir`). It becomes its agent's default when that agent has none, and `agent`'s when there is none; otherwise it asks |
+| `agent-configure --agent claude\|kiro` | chooses (from that agent's profiles) or adds what `claude` / `kiro` use without `AGENT` |
+| `agent-configure --default [<profile>]` | the profile `agent` / `agent-open` use without `AGENT`, and its agent's default (no argument: asks) |
+| `agent-configure --list` | lists the profiles: `*` marks `agent`'s default, `+` each agent's |
 | `agent [args]` | runs the profile's agent sandboxed (`claude` or `kiro`) |
 | `agent-open [args]` | runs it unsandboxed (`claude-open` or `kiro-open`) |
 
 `agent` and `agent-open` take the profile from `$AGENT`, else the file's
-default, else its only profile. With no profiles yet they run
-`agent-configure` first (in a terminal; otherwise they say to run it).
+`default`. Nothing is guessed: with no profiles or no default, they run
+`agent-configure` (in a terminal; otherwise they fail and say what to run).
 
 ## The file
 
@@ -26,6 +28,7 @@ doesn't.
 ```json
 {
   "default": "work-kiro",
+  "defaults": { "claude": "personal-claude", "kiro": "work-kiro" },
   "profiles": {
     "work-kiro":       { "agent": "kiro",   "home": "~/.config/agents/homes/work-kiro" },
     "personal-claude": { "agent": "claude", "home": "~/.config/agents/homes/personal-claude" }
@@ -33,20 +36,25 @@ doesn't.
 }
 ```
 
+`default` is what `agent` / `agent-open` run; `defaults.<agent>` is what that
+CLI's own commands (`claude`, `kiro`, ...) use.
+
 ## The wrappers, and tix
 
 `claude`, `kiro`, `claude-open` and `kiro-open` resolve the profile themselves,
 and only take a profile of their own agent:
 
-1. `AGENT=<profile>` of their agent: that profile
-2. otherwise (no `AGENT`, or another agent's profile): the file's `default` when
-   it is a profile of their agent, else their agent's only profile
-3. otherwise, and always with `AGENT=none`: the usual home (`~/.claude`, `~/.kiro`)
+1. `AGENT=none`: the CLI's usual home (`~/.claude`, `~/.kiro`)
+2. `AGENT=<profile>` of their agent: that profile
+3. otherwise (no `AGENT`, or another agent's profile): `defaults.<agent>`
+4. none set: `agent-configure --agent <agent>` asks you to choose or add one and
+   keeps the answer (in a terminal; otherwise the command fails and says to run
+   it). Nothing is guessed, not even when the agent has only one profile.
 
-So with one claude profile, plain `claude` uses it. That is why tix needs
-nothing of its own here: it keeps starting the CLI it needs (`claude` or
-`kiro`, each with its CLI-specific setup), and `AGENT=work-claude tix start
-PROJ-12` runs that ticket on the work account.
+That is why tix needs nothing of its own here: it keeps starting the CLI it
+needs (`claude` or `kiro`, each with its CLI-specific setup), and
+`AGENT=work-claude tix start PROJ-12` runs that ticket on the work account.
+A `tix` run without a terminal (none that start sessions) needs the default set.
 
 ## What a home holds
 
