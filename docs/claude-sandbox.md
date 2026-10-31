@@ -76,6 +76,9 @@ What the session can touch follows Claude's own settings, not sandbox flags:
   directory leaves that more specific directory writable;
 - with an agent profile (`AGENT=<profile>`, [agents](./agents.md)) the
   profile's home takes `~/.claude`'s place, as `CLAUDE_CONFIG_DIR`;
+- every folder counts as trusted (`CLAUDE_CODE_SANDBOXED=1`, Claude's own
+  switch, set only in the container and never saved to `.claude.json`), so
+  sessions skip the "trust this folder?" dialog; `claude-open` still asks;
 - a deny rule with a `*` component (`a/*/*/*`, one clone per match) also makes the
   directory before the first whole-component `*` read-only, so a session
   can't create files at the levels in between or write into a clone made after

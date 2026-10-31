@@ -107,5 +107,22 @@ agent_profile() {
     return 1
   fi
   mkdir -p "$home" && chmod 700 "$home"
+  [[ "$want" == claude ]] && agents_claude_seed "$home/.claude.json"
   export AGENT_PROFILE="$name" AGENT_HOME="$home"
+}
+
+# agents_claude_seed <file>: a claude profile's .claude.json, when it doesn't
+# exist yet (or is empty, or {}, which the sandbox used to create), starts
+# past Claude's first-run screens: onboarding done (the theme, dark as in
+# settings.json, and the security notes) and terminal setup (the Shift+Enter
+# binding) marked done. Never touched once Claude has written to it. The
+# login is still asked once; folder trust is the sandbox's
+# (CLAUDE_CODE_SANDBOXED), claude-open still asks.
+agents_claude_seed() {
+  local f="$1" c=""
+  [[ -f "$f" ]] && c="$(<"$f")"
+  c="${c//[[:space:]]/}"
+  [[ -z "$c" || "$c" == "{}" ]] || return 0
+  printf '%s\n' '{"hasCompletedOnboarding":true,"theme":"dark","shiftEnterKeyBindingInstalled":true}' > "$f"
+  chmod 600 "$f"
 }

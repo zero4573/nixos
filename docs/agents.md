@@ -71,6 +71,14 @@ A home made by `agent-configure` is private (mode 700) and has a
 `.agent-profile` marker. Log in once per profile: `AGENT=<profile> agent-open`
 then `/login` for claude, `AGENT=<profile> agent-open login` for kiro.
 
+A claude profile's `.claude.json` starts past Claude's first-run screens:
+when it's missing, empty or `{}`, the wrappers write
+`hasCompletedOnboarding`, `theme: "dark"` and
+`shiftEnterKeyBindingInstalled` (`agents_claude_seed` in `agent-profile.sh`),
+and never touch it after that. Only the login is left. The folder-trust
+dialog is skipped in the sandbox alone (`CLAUDE_CODE_SANDBOXED=1`, see
+claude-sandbox.md); `claude-open` still asks.
+
 kiro reads `KIRO_HOME` only when it is absolute and neither your home directory
 nor a folder above it; `agent-configure` refuses those. kiro-cli 2.31.1 doesn't
 read `KIRO_DATA_DIR` for its login, so the login is moved with `XDG_DATA_HOME`.

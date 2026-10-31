@@ -318,7 +318,9 @@ else
     claude_json="$HOME/.claude.json"
   fi
   mkdir -p "$claude_home"
-  touch "$claude_json"
+  # It's bind-mounted as a file, so it must exist; an empty one is invalid
+  # JSON that Claude reports as a corrupt config on first run
+  [[ -s "$claude_json" ]] || echo '{}' > "$claude_json"
 fi
 
 network_flags=()
@@ -959,7 +961,10 @@ if [[ "$agent" == claude ]]; then
     -v "$claude_home:$claude_home:rw"
     -v "$claude_json:$claude_json:rw"
   )
-  [[ -n "${AGENT_HOME:-}" ]] && agent_env_flags=(-e "CLAUDE_CONFIG_DIR=$claude_home")
+  # Every folder counts as trusted (no "trust this folder?" dialog): the
+  # container is the boundary. Not persisted, so claude-open still asks.
+  agent_env_flags=(-e CLAUDE_CODE_SANDBOXED=1)
+  [[ -n "${AGENT_HOME:-}" ]] && agent_env_flags+=(-e "CLAUDE_CONFIG_DIR=$claude_home")
 fi
 
 # kiro's state: unlike ~/.claude, the host's ~/.kiro is never mounted
