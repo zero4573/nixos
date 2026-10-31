@@ -7,11 +7,13 @@
 #   { "default": "work-kiro",
 #     "profiles": { "work-kiro": { "agent": "kiro", "home": "~/.config/agents/homes/work-kiro" } } }
 #
-# AGENT=<profile> picks one. A wrapper only takes a profile of its own agent:
-# AGENT=work-kiro claude keeps Claude's usual home, so a tool that starts a
-# particular CLI (tix) works the same whichever account AGENT names. Without
-# AGENT the wrappers use the CLI's usual home (~/.claude, ~/.kiro); only the
-# dispatcher falls back to the file's default.
+# AGENT=<profile> picks one. A wrapper only takes a profile of its own agent,
+# so a tool that starts a particular CLI (tix) works the same whichever
+# account AGENT names. Without AGENT, or with AGENT naming another agent's
+# profile, a wrapper uses its agent's default: the file's "default" when it
+# is a profile of that agent, else that agent's only profile, else the
+# CLI's usual home (~/.claude, ~/.kiro). AGENT=none always means the usual
+# home.
 
 agents_config() { printf '%s' "${AGENTS_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agents/profiles.json}"; }
 
@@ -41,13 +43,31 @@ agents_field() {
   jq -r --arg n "$1" --arg k "$2" '(.profiles[$n]?[$k]? // "") | if type == "string" then . else "" end' "$f"
 }
 
-# agent_profile <agent>: with AGENT naming a profile of <agent>, exports
-# AGENT_PROFILE and AGENT_HOME (absolute, created if missing) for it; a
-# profile of another agent is left alone (with a note); no AGENT: nothing.
-# Fails, with a message, for a name that isn't a profile or a bad home.
+# agent_default <agent>: the profile a wrapper of <agent> uses without
+# AGENT: the file's default when it is a profile of <agent>, else <agent>'s
+# only profile; "" when neither (the usual home)
+agent_default() {
+  local f
+  f="$(agents_config)"
+  [[ -f "$f" ]] || return 0
+  jq -r --arg a "$1" '(.profiles // {}) as $p
+    | ([$p | to_entries[] | select(.value.agent? == $a) | .key]) as $mine
+    | if (.default | type) == "string" and $p[.default].agent? == $a then .default
+      elif ($mine | length) == 1 then $mine[0]
+      else "" end' "$f" 2>/dev/null || true
+}
+
+# agent_profile <agent>: exports AGENT_PROFILE and AGENT_HOME (absolute,
+# created if missing) for the profile of <agent> to use: AGENT when it
+# names one, else agent_default's; AGENT=none, or no profile of <agent>:
+# nothing (the CLI's usual home). A profile of another agent is left alone
+# (with a note). Fails, with a message, for a name that isn't a profile or
+# a bad home.
 agent_profile() {
   local want="$1" name="${AGENT:-}" agent home
   unset AGENT_PROFILE AGENT_HOME
+  [[ "$name" == none ]] && return 0
+  [[ -n "$name" ]] || name="$(agent_default "$want")"
   [[ -n "$name" ]] || return 0
   if ! agents_valid_name "$name"; then
     echo "agents: AGENT=$name isn't a profile name" >&2
@@ -59,8 +79,9 @@ agent_profile() {
     return 1
   fi
   if [[ "$agent" != "$want" ]]; then
-    echo "agents: AGENT=$name is a $agent profile; $want uses its usual home" >&2
-    return 0
+    name="$(agent_default "$want")"
+    echo "agents: AGENT=${AGENT:-} is a $agent profile; $want uses ${name:-its usual home}" >&2
+    [[ -n "$name" ]] || return 0
   fi
   home="$(agents_expand "$(agents_field "$name" home)")" || return 1
   if [[ "$home" != /* ]]; then

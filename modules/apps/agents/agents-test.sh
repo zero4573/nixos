@@ -127,12 +127,26 @@ else
   fail "default change: $(cat "$OUT")"
 fi
 
-# 5. The wrappers themselves: AGENT of their own agent picks the home; of the
-# other agent, or unset, the usual one (how tix, which runs claude or kiro,
-# gets the account)
+# 5. The wrappers themselves (how tix, which runs claude or kiro, gets the
+# account): AGENT of their own agent picks the home; without AGENT, or with
+# another agent's profile, their agent's default (the file's default when
+# it is theirs, else their only profile, else the usual home); AGENT=none
+# the usual home. The default is personal (claude) here.
+"$bin/stub-claude-sandbox"
+if grep -qx "AGENT_HOME=$p" "$OUT" && grep -qx 'AGENT_PROFILE=personal' "$OUT"; then
+  ok "wrapper: no AGENT, the default profile when it is the wrapper's agent"
+else
+  fail "wrapper default: $(cat "$OUT")"
+fi
+"$bin/stub-kiro-open"
+if grep -qx "AGENT_HOME=$h" "$OUT"; then
+  ok "wrapper: no AGENT and a default of the other agent, its agent's only profile"
+else
+  fail "wrapper only profile: $(cat "$OUT")"
+fi
 AGENT=work-kiro "$bin/stub-claude-sandbox" 2>"$root/err"
-if grep -qx 'AGENT_HOME=' "$OUT" && grep -q 'is a kiro profile' "$root/err"; then
-  ok "wrapper: a profile of the other agent leaves the usual home"
+if grep -qx "AGENT_HOME=$p" "$OUT" && grep -q 'is a kiro profile; claude uses personal' "$root/err"; then
+  ok "wrapper: a profile of the other agent gives its own agent's default"
 else
   fail "wrapper other agent: $(cat "$OUT" "$root/err")"
 fi
@@ -142,11 +156,18 @@ if grep -qx "AGENT_HOME=$p" "$OUT" && grep -qx 'AGENT_PROFILE=personal' "$OUT"; 
 else
   fail "wrapper own agent: $(cat "$OUT")"
 fi
-AGENT_HOME=/stale "$bin/stub-kiro-open"
+AGENT=none AGENT_HOME=/stale "$bin/stub-claude-open"
 if grep -qx 'AGENT_HOME=' "$OUT"; then
-  ok "wrapper: no AGENT, no profile (a stale AGENT_HOME is dropped)"
+  ok "wrapper: AGENT=none, the usual home (a stale AGENT_HOME is dropped)"
 else
-  fail "wrapper no AGENT: $(cat "$OUT")"
+  fail "wrapper none: $(cat "$OUT")"
+fi
+printf 'other-kiro\nkiro\n\nn\n' | "$bin/agent-configure" 2>/dev/null
+"$bin/stub-kiro-open"
+if grep -qx 'AGENT_HOME=' "$OUT"; then
+  ok "wrapper: no AGENT, two profiles of its agent and a default of the other: the usual home"
+else
+  fail "wrapper two profiles: $(cat "$OUT")"
 fi
 if ! AGENT=nope "$bin/stub-kiro-open" 2>/dev/null; then ok "wrapper: an unknown profile fails"; else fail "wrapper: unknown profile ran"; fi
 echo 'not json' > "$cfg"

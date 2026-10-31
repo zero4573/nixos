@@ -33,14 +33,20 @@ doesn't.
 }
 ```
 
-## The wrappers, and ct
+## The wrappers, and tix
 
-`claude`, `kiro`, `claude-open` and `kiro-open` resolve `AGENT` themselves, and
-only take a profile of their own agent. `AGENT=work-kiro claude` keeps Claude's
-usual home, with a note. Without `AGENT` they use the usual homes (`~/.claude`,
-`~/.kiro`). That is why ct needs nothing of its own here: it keeps starting the
-CLI it needs (`claude` or `kiro`, each with its CLI-specific setup), and
-`AGENT=work-claude ct start PROJ-12` runs that ticket on the work account.
+`claude`, `kiro`, `claude-open` and `kiro-open` resolve the profile themselves,
+and only take a profile of their own agent:
+
+1. `AGENT=<profile>` of their agent: that profile
+2. otherwise (no `AGENT`, or another agent's profile): the file's `default` when
+   it is a profile of their agent, else their agent's only profile
+3. otherwise, and always with `AGENT=none`: the usual home (`~/.claude`, `~/.kiro`)
+
+So with one claude profile, plain `claude` uses it. That is why tix needs
+nothing of its own here: it keeps starting the CLI it needs (`claude` or
+`kiro`, each with its CLI-specific setup), and `AGENT=work-claude tix start
+PROJ-12` runs that ticket on the work account.
 
 ## What a home holds
 

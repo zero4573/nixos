@@ -13,7 +13,10 @@ _: {
   #       own agent (agent-profile.sh, sourced into each), so a tool that
   #       starts a particular CLI (tix runs claude or kiro, for their
   #       CLI-specific setup) gets the account AGENT names without knowing
-  #       about profiles; a profile of the other agent is left alone.
+  #       about profiles. Without AGENT (or with another agent's profile) a
+  #       wrapper takes its agent's default: the file's default when it is
+  #       of that agent, else that agent's only profile; AGENT=none, or no
+  #       such profile, is the usual ~/.claude / ~/.kiro.
   #
   #  The profiles file (~/.config/agents/profiles.json) is yours, written by
   #  agent-configure, not by Nix. A profile's home is CLAUDE_CONFIG_DIR for
