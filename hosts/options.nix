@@ -18,6 +18,13 @@
       description = "asdf plugin names to install for the primary user.";
     };
 
+    options.programs.asdf.versions = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      example = { flutter = [ "3.10.4" ]; };
+      description = "asdf tool versions to pre-install for the primary user, by plugin name (each also in programs.asdf.plugins).";
+    };
+
     options.hostConfig = {
       user = {
         name = lib.mkOption {

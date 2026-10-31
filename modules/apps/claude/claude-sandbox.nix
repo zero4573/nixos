@@ -299,7 +299,9 @@ _: {
     # a project's own typescript when it has one, and ruby-lsp only indexes
     # the code (it runs on its own Ruby, so any project Ruby version works),
     # writing its bundle to .ruby-lsp/ (self-ignored) in the working
-    # directory. No SQL server: sqls answers nothing without a configured
+    # directory. dart is Dart's and Flutter's analysis server; in a Flutter
+    # project it resolves package:flutter through .dart_tool/
+    # package_config.json, so `flutter pub get` must have run. No SQL server: sqls answers nothing without a configured
     # database connection, and HAML/ERB have none worth running.
     options.programs.claudeSandbox.lspServers = lib.mkOption {
       type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
@@ -347,6 +349,11 @@ _: {
           command = lib.getExe pkgs.nixd;
           args = [ ];
           extensionToLanguage.".nix" = "nix";
+        };
+        dart = {
+          command = lib.getExe pkgs.dart;
+          args = [ "language-server" "--protocol=lsp" ];
+          extensionToLanguage.".dart" = "dart";
         };
         python = {
           command = lib.getExe' pkgs.basedpyright "basedpyright-langserver";

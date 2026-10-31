@@ -62,6 +62,9 @@ What the session can see and change follows Claude's own settings:
     --*system-prompt-file flags, read-only
   * /nix/store, ~/.claude (its settings, skills and agents read-only), and
     any vault's .obsidian/ read-only
+  * the CA bundle (CACERT_BUNDLE) read-only at /etc/pki/tls/certs/ca-bundle.crt
+    and /etc/ssl/certs/ca-certificates.crt: the image has none, and tools that
+    ignore SSL_CERT_FILE (Dart/pub reads only these locations) need one there
   * container-only managed settings at /etc/claude-code/managed-settings.json
     that allow kill, pkill, killall, rm, rmdir, unlink and git push, and deny
     force pushes and deletes; the user settings' denies of the allowed rules
@@ -938,6 +941,14 @@ else
   echo "claude-sandbox: MANAGED_SETTINGS is unset; kill and delete commands keep Claude's default permission checks" >&2
 fi
 
+# The CA bundle where tools that ignore SSL_CERT_FILE look for one: Dart
+# (flutter pub get) reads only /etc/pki/tls/certs/ca-bundle.crt or a hashed
+# /etc/ssl/certs; Debian-built tools expect /etc/ssl/certs/ca-certificates.crt
+cacert_mounts=(
+  -v "$CACERT_BUNDLE:/etc/pki/tls/certs/ca-bundle.crt:ro"
+  -v "$CACERT_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro"
+)
+
 # --tz=local copies the host's /etc/localtime in, so times Claude shows
 # (/usage resets, timestamps) are the system's rather than UTC
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
@@ -959,6 +970,7 @@ podman run --rm "${tty_flags[@]}" \
   -v "$HOME/.claude:$HOME/.claude:rw" \
   -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
   "${managed_mounts[@]}" \
+  "${cacert_mounts[@]}" \
   "${mounts[@]}" \
   "${tool_versions_mounts[@]}" \
   "${nix_mounts[@]}" \

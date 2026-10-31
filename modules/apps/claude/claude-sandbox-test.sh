@@ -354,6 +354,10 @@ managed_settings="" run_case nomanaged
 if mounts nomanaged | grep -q '/etc/claude-code/'; then fail "managed settings mounted without MANAGED_SETTINGS"; else ok "no managed settings mount without MANAGED_SETTINGS"; fi
 if grep -q 'MANAGED_SETTINGS is unset' "$root/out-nomanaged/stderr"; then ok "unset MANAGED_SETTINGS warns"; else fail "no warning for unset MANAGED_SETTINGS"; fi
 
+# 13b. The CA bundle is mounted where Dart/pub and Debian tools look for one
+assert_mount managed "/nix/store/fake-ca.crt:/etc/pki/tls/certs/ca-bundle.crt:ro" "CA bundle at /etc/pki/tls/certs"
+assert_mount managed "/nix/store/fake-ca.crt:/etc/ssl/certs/ca-certificates.crt:ro" "CA bundle at /etc/ssl/certs"
+
 # 14. The user settings reach the container minus the denies the managed
 # settings allow (rm -rf); unfiltered without managed settings
 new_home filtered

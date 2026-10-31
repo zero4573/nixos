@@ -17,7 +17,7 @@
   # are not resumed after a server restart.
   #
   # The local.layouts plugin (herdr-layout.sh) gives two pane layouts as
-  # actions: Claude | ttt over a shell, bound to prefix+a, and Claude | ttt,
+  # actions: Claude | ttt over two shells, bound to prefix+a, and Claude | ttt,
   # unbound. Its manifest is generated here and linked with
   # `herdr plugin link` on every activation, like ttt's plugin. Activation
   # then reloads a running server's config, which it otherwise keeps.
@@ -49,7 +49,7 @@
       description = "Lay out the current tab: Claude beside ttt, with or without a shell";
       platforms = [ "linux" ];
       actions = [
-        (layoutAction "full" "Layout: Claude | ttt over a shell")
+        (layoutAction "full" "Layout: Claude | ttt over two shells")
         (layoutAction "simple" "Layout: Claude | ttt")
       ];
     };
@@ -106,7 +106,7 @@
             key = "prefix+a";
             type = "plugin_action";
             command = "local.layouts.full";
-            description = "layout: Claude | ttt over a shell";
+            description = "layout: Claude | ttt over two shells";
           }
         ];
       };

@@ -14,6 +14,7 @@
       extraSpecialArgs = {
         inherit self inputs;
         asdfPlugins = config.programs.asdf.plugins;
+        asdfVersions = config.programs.asdf.versions;
       };
       users.${user} = {
         imports = [

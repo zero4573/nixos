@@ -4,7 +4,7 @@ _: {
     users.users.${config.hostConfig.user.name}.shell = pkgs.zsh;
   };
 
-  flake.homeModules.zsh = { pkgs, lib, asdfPlugins, ... }: {
+  flake.homeModules.zsh = { pkgs, lib, asdfPlugins, asdfVersions, ... }: {
     home.packages = [ pkgs.asdf-vm ];
 
     # Install all asdf plugin
@@ -21,6 +21,37 @@ _: {
         run ${asdf} plugin add ${lib.escapeShellArg name} || true
       '') asdfPlugins
     );
+
+    # Pre-install the pinned asdf versions (programs.asdf.versions). A user
+    # service rather than activation: a download like Flutter's SDK
+    # (~800 MB) can outlast home-manager's 5 min activation timeout. Its
+    # script names the versions, so adding one restarts it on switch; it
+    # skips installed ones and retries on failure (e.g. no network yet).
+    systemd.user.services.asdf-install = lib.mkIf (asdfVersions != { }) {
+      Unit.Description = "Install pinned asdf tool versions";
+      Service = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        Restart = "on-failure";
+        RestartSec = "5min";
+        TimeoutStartSec = "1h";
+        ExecStart = lib.getExe (pkgs.writeShellApplication {
+          name = "asdf-install";
+          # What asdf and the plugins' install scripts shell out to
+          runtimeInputs = with pkgs; [
+            asdf-vm git curl jq gnutar xz gzip unzip coreutils gnused gnugrep findutils which
+          ];
+          text = lib.concatStrings (lib.mapAttrsToList (name: versions:
+            lib.concatMapStrings (version: ''
+              if [[ ! -d "''${ASDF_DATA_DIR:-$HOME/.asdf}/installs/"${lib.escapeShellArg "${name}/${version}"} ]]; then
+                asdf plugin add ${lib.escapeShellArg name} || true
+                asdf install ${lib.escapeShellArg name} ${lib.escapeShellArg version}
+              fi
+            '') versions) asdfVersions);
+        });
+      };
+      Install.WantedBy = [ "default.target" ];
+    };
 
     # For fuzzy searching
     programs.fzf = {

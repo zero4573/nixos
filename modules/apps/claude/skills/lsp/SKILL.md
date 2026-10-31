@@ -1,6 +1,6 @@
 ---
 name: lsp
-description: Use the LSP tool (language servers) instead of Grep to find a symbol's references, callers, callees, definition or implementations, or to list a file's or workspace's symbols, in Go, TypeScript/JavaScript, Ruby, Terraform, shell, YAML, Nix or Python code. Use it before tracing usages or impact of a change by text search.
+description: Use the LSP tool (language servers) instead of Grep to find a symbol's references, callers, callees, definition or implementations, or to list a file's or workspace's symbols, in Go, TypeScript/JavaScript, Ruby, Terraform, shell, YAML, Nix, Python or Dart/Flutter code. Use it before tracing usages or impact of a change by text search.
 ---
 
 # Code navigation with the LSP tool

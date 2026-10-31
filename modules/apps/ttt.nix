@@ -7,8 +7,8 @@
   # that shifts them, so every commit fails with "Could not read commit". The
   # wrapper turns it off for ttt's git calls (and so for its terminal panes).
   # It also appends the language servers and ttt-prettier to PATH, after
-  # the user's own, so a gopls or typescript-language-server already on PATH
-  # still wins. ttt-prettier is the JS/TS formatter (see the home module):
+  # the user's own, so a gopls, typescript-language-server or dart (e.g. a
+  # Flutter SDK's, matching the project) already on PATH still wins. ttt-prettier is the JS/TS formatter (see the home module):
   # the project's own node_modules/.bin/prettier, found from the file's
   # directory up, so its version and plugins apply, else nixpkgs' prettier.
   flake.nixosModules.ttt = { config, lib, pkgs, ... }:
@@ -40,6 +40,7 @@
             pkgs.gopls
             pkgs.typescript-language-server
             pkgs.vscode-langservers-extracted
+            pkgs.dart
             tttPrettier
           ]}
       '';
@@ -61,7 +62,7 @@
   # when settings change in the editor, so it can't be a read-only store
   # link; activation merges the servers below into it instead, replacing
   # those keys and keeping everything else. Formatting is the servers' too
-  # (gopls: gofmt; vscode-json-language-server), except JS/TS: the
+  # (gopls: gofmt; dart format; vscode-json-language-server), except JS/TS: the
   # TypeScript server's formatter isn't prettier, so those extensions also
   # get ttt-prettier as their external formatter (Ctrl+L E, and on save
   # with editor.formatOnSave), merged into `formatters` the same way.
@@ -73,6 +74,10 @@
     settings = "${config.xdg.configHome}/ttt/settings.json";
     servers = pkgs.writeText "ttt-lsp-servers.json" (builtins.toJSON {
       go.command = [ "gopls" "serve" ];
+      dart = {
+        command = [ "dart" "language-server" "--protocol=lsp" ];
+        languages.".dart" = "dart";
+      };
       typescript = {
         command = [ "typescript-language-server" "--stdio" ];
         languages = {

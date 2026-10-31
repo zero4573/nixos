@@ -59,6 +59,9 @@
       "nodejs"
       "erlang"
       "elixir"
+      "flutter"
     ];
+
+    programs.asdf.versions.flutter = [ "3.10.4" ];
   };
 }
