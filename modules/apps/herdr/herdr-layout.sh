@@ -2,8 +2,8 @@
 # focused pane when run outside one), splitting it rather than replacing
 # the tab, so nothing already running is lost:
 #   full    Claude | ttt over two shells side by side, each half the
-#           width; Claude (with --add-dir andy-ct), ttt and the left shell
-#           in andy-nixos, the right shell in andy-ct
+#           width; Claude (with --add-dir andy-tix), ttt and the left shell
+#           in andy-nixos, the right shell in andy-tix
 #   simple  Claude | ttt
 # The left pane is the existing one: claude is started in it only when it
 # sits at a shell prompt, and is the sandboxed claude. In simple, ttt opens
@@ -39,11 +39,11 @@ split() {
 if [[ "$mode" == full ]]; then
   right="$(split "$base" right "$repos/andy-nixos")"
   shell="$(split "$right" down "$repos/andy-nixos")"
-  split "$shell" right "$repos/andy-ct" >/dev/null
+  split "$shell" right "$repos/andy-tix" >/dev/null
 else
   right="$(split "$base" right)"
 fi
-herdr pane run "$right" "ttt . ../andy-ct" >/dev/null
+herdr pane run "$right" "ttt . ../andy-tix" >/dev/null
 
 # The sandboxed claude (claude-sandbox.nix) by its profile path, typed into
 # the pane's shell, so another claude earlier on that shell's PATH can't
@@ -51,10 +51,10 @@ herdr pane run "$right" "ttt . ../andy-ct" >/dev/null
 claude=claude
 profile_claude="/etc/profiles/per-user/${USER:-$(id -un)}/bin/claude"
 [[ -x "$profile_claude" ]] && claude="$profile_claude"
-# full: in andy-nixos, with andy-ct added, as ttt opens them
+# full: in andy-nixos, with andy-tix added, as ttt opens them
 cmd="$(printf '%q' "$claude")"
 if [[ "$mode" == full ]]; then
-  cmd="cd $(printf '%q' "$repos/andy-nixos") && $cmd --add-dir $(printf '%q' "$repos/andy-ct")"
+  cmd="cd $(printf '%q' "$repos/andy-nixos") && $cmd --add-dir $(printf '%q' "$repos/andy-tix")"
 fi
 case "$fg" in
   zsh | bash | sh | fish) herdr pane run "$base" "$cmd" >/dev/null ;;

@@ -1,26 +1,5 @@
 {
   "nodes": {
-    "claude-tickets": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1793340267,
-        "narHash": "sha256-prKBUWGZM3sx0xGSO6jo/EfCSXIrylX5lYv9JNYd17g=",
-        "ref": "main",
-        "rev": "eefc167f697fee0e0fdfc00828d88b9a18e726a7",
-        "revCount": 236,
-        "type": "git",
-        "url": "ssh://git@ssh.bitbucket.org/streamsix/andy-ct.git"
-      },
-      "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "ssh://git@ssh.bitbucket.org/streamsix/andy-ct.git"
-      }
-    },
     "disko": {
       "inputs": {
         "nixpkgs": [
@@ -158,14 +137,35 @@
     },
     "root": {
       "inputs": {
-        "claude-tickets": "claude-tickets",
         "disko": "disko",
         "flake-parts": "flake-parts",
         "home-manager": "home-manager",
         "import-tree": "import-tree",
         "nix-flatpak": "nix-flatpak",
         "nixpkgs": "nixpkgs",
+        "tix": "tix",
         "wrapper-modules": "wrapper-modules"
+      }
+    },
+    "tix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793405267,
+        "narHash": "sha256-kC5HjcJJQ6BMwBUO/6WpB8USpySMlh74Bf2ON/pvxA8=",
+        "ref": "main",
+        "rev": "59a9f060b5769f39c5a83648450f1f0ff3ee2770",
+        "revCount": 237,
+        "type": "git",
+        "url": "ssh://git@ssh.bitbucket.org/streamsix/andy-tix.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "ssh://git@ssh.bitbucket.org/streamsix/andy-tix.git"
       }
     },
     "wrapper-modules": {

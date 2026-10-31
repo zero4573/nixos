@@ -22,12 +22,12 @@
 
     # The ticket workflow (tix: commands, the plugin for Claude Code and
     # kiro, Obsidian vault setup),
-    # its own repo (andy-ct on Bitbucket, fetched over ssh with your Bitbucket
+    # its own repo (andy-ct on Bitbucket, checked out as andy-tix, fetched over ssh with your Bitbucket
     # key). See modules/apps/tix.nix. To try local changes
     # before pushing: --override-input tix
-    # git+file:///home/ato/Projects/repo-work/bitbucket/streamsix/andy-ct
+    # git+file:///home/ato/Projects/repo-work/bitbucket/streamsix/andy-tix
     tix = {
-      url = "git+ssh://git@ssh.bitbucket.org/streamsix/andy-ct.git?ref=main";
+      url = "git+ssh://git@ssh.bitbucket.org/streamsix/andy-tix.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
