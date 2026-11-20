@@ -1,0 +1,123 @@
+# AGENTS.md
+
+Instructions for AI coding agents working in this repository.
+
+## What this is
+
+A NixOS flake managing three hosts via flake-parts + `import-tree`, following the
+**dendritic pattern**: every `.nix` file under a directory that's fed to `import-tree`
+is itself a flake-parts module (signature `{ self, inputs, ... }: { ... }`), not a
+plain NixOS module. Fine-grained modules expose `flake.nixosModules.<name>`; coarse
+"profiles" import several of them; hosts compose profiles. There is no single
+top-down `configuration.nix` — everything is assembled from `self.nixosModules.*`.
+
+For the in-progress multi-host buildout plan and decisions log, see `plan.md`.
+Design and security rationale lives in `docs/` (listed in README.md), not in code
+comments; update the matching doc when a decision changes.
+For everything that must be updated by hand (pins, overrides, container
+images, flatpaks — anything `nix flake update` doesn't move), see `UPDATES.md`.
+
+## Directory layout
+
+```
+flake.nix                       inputs, nixConfig, perSystem pkgs (allowUnfree), imports
+options.nix                     flake.nixosModules.hostOptions — the hostConfig.* namespace
+hosts/common.nix                commonConfigs — reads hostConfig.* (stateVersion, timezone, git, ...)
+hosts/<host>/{default,settings,disko}.nix   per-host nixosConfigurations + hostConfig values
+profiles/{desktop,work,personal,vm-guest}.nix   composition layer over modules/
+modules/desktop/{audio,bluetooth,fonts,graphics,portals}.nix
+modules/desktop/networking/     networking.nix + DoH prompt/dispatch/wait scripts
+modules/apps/*.nix              single-file apps (browsers, terminals, dev, containers, ...)
+modules/apps/claude/            claude-code (settings, hooks, skills/, agents/; every Claude home gets `user-CLAUDE.md` as its CLAUDE.md (no comments, no attribution trailers), `attribution` empty, and a PostToolUse `tix hook comment-check --anywhere`, so the locked tix must have that flag), claude-sandbox: `claude` sandboxed by default, `claude-open` plain (+ setup scripts; every session gets the `lspServers` plugin for the LSP tool, sandboxed ones also `extraMcpServers`)
+                                 flake check `claude-sandbox` (`claude-sandbox-check.nix`): shellcheck + `claude-sandbox-test.sh` (stubbed launch, asserts the mount list) and `claude-sandbox-self-check-test.sh`; run the test directly with `bash modules/apps/claude/claude-sandbox-test.sh` (its git-ssh-broker cases run when `GIT_SSH_BROKER` points at a broker binary)
+modules/apps/kiro/              kiro-sandbox: `kiro` (kiro-cli sandboxed, the same claude-sandbox.sh with `SANDBOX_AGENT=kiro`, pieces from `programs.claudeSandbox.shared`), `kiro-open` plain; chats in the sandbox run with `--trust-all-tools` (`SANDBOX_TRUST_ALL=0` off); own ~/.kiro + data dir in ~/.local/share/kiro-sandbox, host agents/skills/steering read-only; its cases are in claude-sandbox-test.sh
+modules/apps/agents/            agent accounts: `agent-configure` writes ~/.config/agents/profiles.json (yours, not Nix's); `agent` / `agent-open` run a profile's sandboxed / open wrapper; agent-profile.sh is inlined into the claude/kiro wrappers, which take `AGENT=<profile>` of their own agent, else `defaults.<agent>`, else ask through `agent-configure --agent` (every run is on a profile; tix needs nothing); flake check `agents` (`bash modules/apps/agents/agents-test.sh`)
+modules/apps/npm-sandbox/       npm-sandbox.nix + its script
+modules/apps/sandbox-proxy/     credential broker for the sandboxes: registry proxies + MCP auth proxy (mcp-guard: Go source in mcp-guard/, package `.#mcp-guard`; adds each MCP server's credential and refuses gated tool calls off `programs.sandboxProxy.mcpPolicies`' allowlist, e.g. Bitbucket merges)
+modules/apps/git-ssh-broker/    git over SSH + commit signing for claude-sandbox (Go source in src/, package `.#git-ssh-broker`): one per session on the host; pushes go through the host's ssh/1Password agent, branch/tag deletes, tag moves and force pushes refused, except rewriting a `programs.gitSshBroker.rewritableBranches` branch (default `feature/*`, path.Match globs) when every dropped commit (`git rev-list old ^new`) has an `identityEmails` author and committer (default the hostConfig.git emails; none → no rewrite); `git-lfs-authenticate` is brokered too (the sandbox has git-lfs with `lfs.sshtransfer=never`); its agent signs git signatures only
+modules/apps/review-broker/     deep reviews on kiro models of other families for Claude sessions (Go source in src/, package `.#review-broker`): one per Claude session in a tix ticket workspace, on the host; runs the kiro sandbox launcher with `--model` from `programs.reviewBroker.models`, statuses ok/usage-limit/timeout/failed/refused, never runs git
+modules/apps/tix.nix wires the tix flake input (ticket workflow + Obsidian vaults, its own repo) to this machine: sandbox, sandbox-proxy MCP, session rules
+modules/apps/{zed,zsh}/         app module + its config files
+modules/apps/herdr/             herdr config (notifications, Claude usage rows, kiro usage rows read from the kiro sandbox's session records (`usage ERROR` when their format changes), startup screens off, new workspaces in ~ with a name prompt) + local.layouts plugin (herdr-layout.sh)
+modules/apps/ttt.nix            ttt wrapper (LSP servers, ttt-prettier, git signature fix), merged ttt settings, its herdr plugin
+modules/corp/{tailscale,globalprotect,teamviewer,zscaler,beyondtrust,intune}.nix
+modules/flatpak/flatpak.nix
+modules/hardware/framework.nix
+modules/hardware/mouse-debounce/   mouse-debounce.nix + Go daemon source in src/
+modules/home/{home-manager,desktop-home,users,nodatacow}.nix
+modules/niri/niri.nix           niri wrapper package + keybinds (host-agnostic)
+modules/noctalia/, modules/thunar/, modules/vicinae/
+```
+
+Hosts:
+- **framework-work** — primary daily desktop; `workProfile` (desktop + corp tools + work autostart); disko btrfs+LUKS.
+- **framework-personal** — secondary desktop, separate disk; `personalProfile` (desktop + Steam flatpak); disko btrfs+LUKS.
+- **vm** — throwaway test VM; imports `workProfile` too, so it mirrors framework-work's *software* set on VM hardware (ext4/grub, no disko).
+
+## Conventions
+
+- **Every new file under `modules/`, `profiles/`, or `hosts/` must be a flake-parts
+  module**: `{ self, inputs, ... }: { flake.nixosModules.<name> = { ... }: { ... }; }`.
+  Use `_:` for the outer function head if `self`/`inputs` are unused.
+- An app/feature that spans more than one file (scripts, config files, source,
+  multiple related modules) gets its own directory named after it, with its
+  module(s) and every supporting file co-located, e.g. `modules/apps/claude/`.
+  Single-file modules stay flat. Supporting files are referenced by sibling
+  relative path (`./foo.sh`); components shared by several apps (e.g.
+  `sandbox-proxy`, `ai-sandbox-slice.nix`) stay in their own place rather
+  than under one consumer.
+- Anything pinned or fetched outside `flake.lock` (a `fetchurl`/`fetchFromGitHub`
+  with a hash, a version override in an overlay, a container image tag, a
+  flatpak, a pip/npm version, a runtime download) must get a row in
+  `UPDATES.md` saying where it lives and how to bump it — and the row is
+  removed when the pin goes away.
+- Reference other modules via `self.nixosModules.<name>` / `self.homeModules.<name>`,
+  never by filesystem path — the flake namespace is the contract, not the directory.
+- Per-host values (user, timezone, git identity, profile) go through `hostConfig.*`
+  (defined in `options.nix`), set in each host's `settings.nix`. Don't hardcode
+  usernames or emails in shared modules.
+- `specialArgs = { inherit self inputs; }` is set per-host in `default.nix` so profile
+  modules can reach `inputs`/`self` at NixOS-eval time.
+- New nixpkgs-backed inputs go in `flake.nix`; new module trees are picked up
+  automatically since `modules/`, `profiles/`, `hosts/` are already `import-tree`'d —
+  no need to edit the `imports` list in `flake.nix` for a new file, only for a new
+  top-level directory.
+- Corp tools not packaged in nixpkgs (zscaler, beyondtrust) are intentionally
+  no-op placeholder modules with a TODO comment explaining the packaging approach
+  (autoPatchelfHook / buildFHSEnv) — keep them evaluable, don't delete them.
+- niri stays **host-agnostic** (`modules/niri/niri.nix`): keybinds/spawn-at-startup
+  live there for all hosts. Profile-specific autostart (1Password, Teams PWA) goes
+  in a profile module as gated systemd user services, not into niri directly.
+
+## Building / checking
+
+```sh
+nix flake check --no-build              # fast: evaluate all modules/configs
+nix build .#nixosConfigurations.<host>.config.system.build.toplevel --dry-run
+./nixos-rebuild.sh <host>                # nixos-rebuild switch --sudo --flake .#<host>
+bash modules/apps/claude/claude-sandbox-test.sh   # sandbox launcher (stubbed podman)
+bash modules/apps/claude/claude-sandbox-self-check-test.sh   # sandbox-self-check command
+bash modules/apps/asdf/asdf-gcroots-test.sh       # asdf GC roots (minimal PATH)
+bash modules/apps/agents/agents-test.sh           # agent profiles (agent-configure, agent, wrappers' AGENT)
+shellcheck -s bash modules/apps/claude/*.sh modules/apps/asdf/*.sh
+nix build .#checks.x86_64-linux.claude-sandbox .#checks.x86_64-linux.asdf-gcroots
+nix build .#git-ssh-broker                         # runs the broker's Go tests (real git push + ssh-agent)
+(cd modules/apps/git-ssh-broker/src && go test ./...)
+nix build .#review-broker                          # runs the review broker's Go tests (stub kiro launcher)
+(cd modules/apps/review-broker/src && go test -race ./...)
+nix build .#mcp-guard                              # runs the MCP guard's Go tests
+(cd modules/apps/sandbox-proxy/mcp-guard && go test ./...)
+```
+
+`<host>` is one of `framework-work`, `framework-personal`, `vm`. Only `vm` can
+actually be rebuilt/tested from a dev machine; the framework hosts need real
+hardware (disko will partition real disks — do not build/switch those without
+explicit confirmation of the target device).
+
+## Gotchas
+
+- podman: `dockerCompat` gives a `docker` alias — never add `pkgs.docker` alongside it.
+- disko owns root/boot filesystems on the framework hosts — hardware modules for
+  those hosts must not also declare `fileSystems."/"` etc.
+- `config.nix` (repo root) is gitignored (machine-local override) but does not
+  currently exist in this checkout — don't assume it's present.
