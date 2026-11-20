@@ -53,10 +53,11 @@ flowchart LR
   is merged, deleting the branch ref with `git update-ref -d` after checking
   it is merged (`git branch -d` would write the main clone's read-only config;
   `-D` stays denied).
-- `sessionSettings.autoCompactWindow = 200000`: ticket sessions compact by
-  themselves. The PO writes its state to its board and relay as it changes, so
-  compaction loses nothing, and tix's SessionStart hook resumes from the board;
-  200k keeps a PO's context short of where it stops paying for itself.
+- Ticket sessions compact by themselves at 200k, from the `autoCompactWindow`
+  every Claude home gets (`modules/apps/claude/claude-code.nix`). The PO writes
+  its state to its board and relay as it changes, so compaction loses nothing,
+  and tix's SessionStart hook resumes from the board; 200k keeps a PO's context
+  short of where it stops paying for itself.
 - Rovo tools that consume paid credits are denied.
 - `SANDBOX_*` set in the shell that runs `tix` reach that one session (claude's
   or kiro's sandbox), because the session runs in the foreground of that shell

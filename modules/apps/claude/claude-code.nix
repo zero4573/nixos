@@ -87,6 +87,7 @@ _: {
       env.ENABLE_LSP_TOOL = "1";
       statusLine = { type = "command"; command = "${statusLineScript}"; refreshInterval = 60; };
       autoUpdate = false;
+      autoCompactWindow = 200000;
       attribution = { commit = ""; pr = ""; };
       includeCoAuthoredBy = false;
       cleanupPeriodDays = 90;

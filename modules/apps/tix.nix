@@ -20,7 +20,6 @@ _: {
       mcpConfig = "${config.xdg.configHome}/sandbox-proxy/mcp-host.json";
       mcpPrepare = "sandbox-proxy start mcp";
 
-      sessionSettings.autoCompactWindow = 200000;
       sessionSettings.permissions.allow = [
         "Bash(tix ws cleanup:*)"
         "Bash(tix ws resign:*)"
