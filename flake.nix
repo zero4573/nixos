@@ -32,6 +32,7 @@
       systems = [ "x86_64-linux" ];
       imports = [
         (inputs.import-tree ./modules)
+        (inputs.import-tree ./profiles)
         (inputs.import-tree ./hosts)
       ];
 

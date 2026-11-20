@@ -1,0 +1,65 @@
+{ self, inputs, ... }: {
+  flake.nixosModules.desktopProfile = { pkgs, ... }: {
+    imports = [
+      self.nixosModules.commonConfigs
+      self.nixosModules.audio
+      self.nixosModules.bluetooth
+      self.nixosModules.graphics
+      self.nixosModules.fonts
+      self.nixosModules.portals
+      self.nixosModules.networking
+
+      self.nixosModules.niri
+      self.nixosModules.noctalia
+      self.nixosModules.thunar
+
+      self.nixosModules.browsers
+      self.nixosModules.terminals
+      self.nixosModules.herdr
+      self.nixosModules.ttt
+      self.nixosModules.dev
+      self.nixosModules.containers
+      self.nixosModules.joplin
+      inputs.tix.nixosModules.obsidian
+      self.nixosModules.sublimeMerge
+      self.nixosModules.calibre
+      self.nixosModules.screenshot
+      self.nixosModules.zsh
+      self.nixosModules.zed
+      self.nixosModules.vscode
+      self.nixosModules.godot
+
+      self.nixosModules.flatpakBase
+      self.nixosModules.homeBase
+    ];
+
+    services.flatpak.packages = [
+      "com.github.tchx84.Flatseal"
+      "com.discordapp.Discord"
+      "org.libreoffice.LibreOffice"
+      "com.rtosta.zapzap"
+      "org.gimp.GIMP"
+      "com.valvesoftware.Steam"
+    ];
+
+    # flatpak Steam can't ship udev rules for Steam controllers
+    hardware.steam-hardware.enable = true;
+
+    environment.systemPackages = [
+      pkgs.remmina
+      pkgs.xournalpp
+    ];
+
+    programs.asdf.plugins = [
+      "golang"
+      "java"
+      "python"
+      "nodejs"
+      "erlang"
+      "elixir"
+      "flutter"
+    ];
+
+    programs.asdf.versions.flutter = [ "3.10.4" ];
+  };
+}
