@@ -27,6 +27,7 @@
           self.homeModules.zsh
           self.homeModules.nodatacow
           self.homeModules.git
+          self.homeModules.diffnav
           self.homeModules.zed
           self.homeModules.claudeCode
           self.homeModules.claudeSandbox

@@ -75,6 +75,11 @@ flowchart LR
   module cache.
 - PowerShell is in the sandboxes because repos whose tooling ships `.ps1` next to
   `.sh` have tests for both.
+- `tix ws diff` opens diffnav in a terminal; its look (Catppuccin Mocha to match
+  alacritty's selection colours, Nerd Font icons, no header, a wider file tree
+  for the repo folders) is `~/.config/diffnav/config.yml` from
+  `modules/apps/diffnav.nix`. `T` in diffnav previews the other themes for
+  that run only; the file is read-only.
 - `tixd work|tickets|repos` is a zsh function: it runs `tix dir <arg>` and `cd`s
   to the printed directory (a command can't change the shell's directory).
 
