@@ -75,7 +75,9 @@ flowchart LR
   module cache.
 - PowerShell is in the sandboxes because repos whose tooling ships `.ps1` next to
   `.sh` have tests for both.
-- `tix ws diff` opens diffnav in a terminal; its look (Catppuccin Mocha to match
+- `tix ws diff` opens diffnav in a terminal, the one this machine installs
+  (`modules/apps/diffnav.nix`; tix ships none, and 0.12 starts with its
+  file filter focused so `q` doesn't quit); its look (Catppuccin Mocha to match
   alacritty's selection colours, Nerd Font icons, no header, a wider file tree
   for the repo folders) is `~/.config/diffnav/config.yml` from
   `modules/apps/diffnav.nix`. `T` in diffnav previews the other themes for

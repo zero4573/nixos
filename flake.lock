@@ -154,11 +154,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795164904,
-        "narHash": "sha256-ZMu1Xbw8OviIXK4w5VSqlCMDM4onDuUaPxO0a9hoTcU=",
+        "lastModified": 1795175583,
+        "narHash": "sha256-G28OWJCCNxjDzYkQJk9v9CLRCwewWeUtyzTugBGJ2L4=",
         "ref": "main",
-        "rev": "728020f2f17c1ee922b5e683345ff9a5fa2d9f9d",
-        "revCount": 21,
+        "rev": "880e0ae5849af76a5bec80552cfa32e546f89eb9",
+        "revCount": 26,
         "type": "git",
         "url": "ssh://git@ssh.bitbucket.org/streamsix/andy-tix.git"
       },
