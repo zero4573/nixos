@@ -326,13 +326,15 @@ flowchart TD
   project) a [review-broker](./architecture.md#review-broker) socket is mounted
   as `TIX_REVIEW_BROKER_SOCKET`; kiro's login never enters this sandbox.
 - **language servers**: `programs.claudeSandbox.lspServers` (by default gopls,
-  typescript-language-server, ruby-lsp, terraform-ls, bash-language-server,
+  typescript-language-server, jdtls, ruby-lsp, terraform-ls, bash-language-server,
   yaml-language-server, nixd, basedpyright and dart; none for SQL, HAML or ERB) become a
   Claude Code plugin (`.lsp.json`) that both `claude` and `claude-open` load
   with `--plugin-dir`; `ENABLE_LSP_TOOL=1` (claude-code.nix) turns on the LSP
   tool, and the `lsp` skill tells Claude when to use it. Servers start on
   demand for the files they claim. gopls takes `go` from the session's PATH
   (asdf), typescript-language-server prefers a project's own typescript,
+  jdtls runs on its own JDK 21 (whatever JDK the project builds with) and
+  imports the Maven or Gradle build through the registry proxy,
   ruby-lsp runs on its own Ruby and writes a self-ignored `.ruby-lsp/`, and dart
   needs `flutter pub get` to have run. There is no SQL server because sqls needs
   a configured database.

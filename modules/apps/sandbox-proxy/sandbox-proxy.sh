@@ -31,6 +31,8 @@ Usage:
   sandbox-proxy sandbox-goproxy
   sandbox-proxy sandbox-docker-prefix
   sandbox-proxy sandbox-maven-settings
+  sandbox-proxy sandbox-maven-repo-url
+  sandbox-proxy sandbox-gradle-init
   sandbox-proxy sandbox-extra-host
   sandbox-proxy mcp add <name> --url <url> --op-item <1password item> [--auth basic|bearer]
   sandbox-proxy mcp remove <name>
@@ -430,12 +432,44 @@ cmd_sandbox_goproxy() {
   echo "http://registry-proxy:7080$GO_PATH"
 }
 
-cmd_sandbox_maven_settings() {
+require_maven_repo() {
   discover_config
   if [ -z "$MAVEN_REPO" ]; then
     echo "sandbox-proxy: no maven repository configured (run host-login --maven-repo first)" >&2
     exit 1
   fi
+}
+
+cmd_sandbox_maven_repo_url() {
+  require_maven_repo
+  echo "http://registry-proxy:7080/artifactory/$MAVEN_REPO"
+}
+
+cmd_sandbox_gradle_init() {
+  require_maven_repo
+  cat <<INIT
+def artifactoryHost = '$ARTIFACTORY_HOST'
+def redirect = { repo ->
+    if (repo instanceof MavenArtifactRepository && repo.url?.host == artifactoryHost) {
+        repo.url = 'http://registry-proxy:7080' + repo.url.path
+        repo.allowInsecureProtocol = true
+    }
+}
+settingsEvaluated { settings ->
+    settings.pluginManagement.repositories.configureEach(redirect)
+    if (GradleVersion.current() >= GradleVersion.version('6.8')) {
+        settings.dependencyResolutionManagement.repositories.configureEach(redirect)
+    }
+}
+allprojects {
+    buildscript.repositories.configureEach(redirect)
+    repositories.configureEach(redirect)
+}
+INIT
+}
+
+cmd_sandbox_maven_settings() {
+  require_maven_repo
   cat <<SETTINGS
 <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
   <mirrors>
@@ -622,6 +656,8 @@ case "${1:-}" in
   sandbox-goproxy) cmd_sandbox_goproxy ;;
   sandbox-docker-prefix) cmd_sandbox_docker_prefix ;;
   sandbox-maven-settings) cmd_sandbox_maven_settings ;;
+  sandbox-maven-repo-url) cmd_sandbox_maven_repo_url ;;
+  sandbox-gradle-init) cmd_sandbox_gradle_init ;;
   sandbox-extra-host) cmd_sandbox_extra_host ;;
   mcp) shift; cmd_mcp "$@" ;;
   mcp-configured) cmd_mcp_configured ;;

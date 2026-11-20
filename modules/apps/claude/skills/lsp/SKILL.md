@@ -1,6 +1,6 @@
 ---
 name: lsp
-description: Use the LSP tool (language servers) instead of Grep to find a symbol's references, callers, callees, definition or implementations, or to list a file's or workspace's symbols, in Go, TypeScript/JavaScript, Ruby, Terraform, shell, YAML, Nix, Python or Dart/Flutter code. Use it before tracing usages or impact of a change by text search.
+description: Use the LSP tool (language servers) instead of Grep to find a symbol's references, callers, callees, definition or implementations, or to list a file's or workspace's symbols, in Go, TypeScript/JavaScript, Java, Ruby, Terraform, shell, YAML, Nix, Python or Dart/Flutter code. Use it before tracing usages or impact of a change by text search.
 ---
 
 # Code navigation with the LSP tool
@@ -41,6 +41,11 @@ It is a deferred tool: load its schema first with ToolSearch
 - **TypeScript/JavaScript** (typescript-language-server): `findReferences`
   on some exported functions returns only the declaration. Use
   `incomingCalls` for callers, or `findReferences` from a call site.
+- **Java** (jdtls): every operation, once it has imported the build
+  (Maven or Gradle): the first calls in a project can fail or come back
+  empty for a minute or more while it resolves dependencies; wait and
+  retry. It needs the build's dependencies reachable (the `java` skill).
+  Its workspace data is in `~/.cache/jdtls`.
 - **Ruby** (ruby-lsp): indexes by name, not types, so references to a
   common method name (`call`, `save`) can include other classes'; check
   each hit. It works on any Ruby version's code. The first call may fail

@@ -342,6 +342,14 @@ if [[ "$proxy_registry" == 1 ]]; then
     mounts+=(-v "$tmp_dir/maven-settings.xml:$HOME/.m2/settings.xml:ro")
   fi
 
+  if maven_repo_url="$(sandbox-proxy sandbox-maven-repo-url 2>/dev/null)"; then
+    registry_env_flags+=(-e "MVNW_REPOURL=$maven_repo_url")
+  fi
+
+  if sandbox-proxy sandbox-gradle-init > "$tmp_dir/sandbox-proxy.gradle" 2>/dev/null; then
+    mounts+=(-v "$tmp_dir/sandbox-proxy.gradle:$HOME/.gradle/init.d/sandbox-proxy.gradle:ro")
+  fi
+
   if docker_prefix="$(sandbox-proxy sandbox-docker-prefix 2>/dev/null)"; then
     registry_env_flags+=(-e "REGISTRY_MIRROR_PREFIX=$docker_prefix")
   fi

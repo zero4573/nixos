@@ -42,7 +42,7 @@ sequenceDiagram
         S->>K: recreate only these
     end
     S-->>L: ready
-    L->>S: sandbox-npmrc, sandbox-goproxy, sandbox-maven-settings, sandbox-mcp-config ...
+    L->>S: sandbox-npmrc, sandbox-goproxy, sandbox-maven-settings, sandbox-gradle-init, sandbox-mcp-config ...
     S-->>L: credential-free URLs
 ```
 
@@ -80,7 +80,15 @@ to still exist.
   (`sandbox-maven-settings`) mirroring every repository (`mirrorOf *`) to
   `http://registry-proxy:7080/artifactory/<repo>/`, so Maven Central and any
   repository a POM names resolve through Artifactory, and no credential is in
-  the sandbox.
+  the sandbox. `MVNW_REPOURL` points `./mvnw`'s own download there too.
+- Gradle gets a read-only `~/.gradle/init.d/sandbox-proxy.gradle`
+  (`sandbox-gradle-init`) that points only repositories on the Artifactory
+  host at the same HTTP route (settings, plugin management and projects);
+  public ones (Gradle plugin portal, services.gradle.org) stay direct, since
+  Artifactory has no remote for them.
+- The same files work inside `podman build`: nested containers resolve
+  `registry-proxy`, so the build's `RUN` steps get them as `-v` mounts (the
+  `java` skill has the command).
 - The Artifactory host and npm/go/docker/maven paths are read back from the native
   config `host-login` wrote. Only `GOPROXY`'s first entry (ours) matters; later
   entries are the fallback chain `host-login` keeps.

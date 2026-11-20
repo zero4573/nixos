@@ -67,6 +67,8 @@ stub sandbox-proxy <<'STUB'
 case "$1" in
   configured|start) exit 0 ;;
   sandbox-maven-settings) echo '<settings/>' ;;
+  sandbox-maven-repo-url) echo 'http://registry-proxy:7080/artifactory/java-virtual' ;;
+  sandbox-gradle-init) echo 'allprojects {}' ;;
   *) exit 1 ;;
 esac
 STUB
@@ -158,6 +160,16 @@ if mounts maven | grep -q ":$home/\.m2/settings\.xml:ro\$"; then
   ok "the registry's maven settings are mounted read-only"
 else
   fail "no maven settings mount in:"$'\n'"$(mounts maven)"
+fi
+if mounts maven | grep -q ":$home/\.gradle/init\.d/sandbox-proxy\.gradle:ro\$"; then
+  ok "the gradle init script is mounted read-only"
+else
+  fail "no gradle init script mount in:"$'\n'"$(mounts maven)"
+fi
+if grep -qx 'MVNW_REPOURL=http://registry-proxy:7080/artifactory/java-virtual' "$root/out-maven/run.args"; then
+  ok "the maven wrapper downloads through the proxy"
+else
+  fail "no MVNW_REPOURL"
 fi
 
 new_home dups

@@ -315,6 +315,11 @@ _: {
           args = [ "language-server" "--protocol=lsp" ];
           extensionToLanguage.".dart" = "dart";
         };
+        java = {
+          command = lib.getExe' pkgs.jdt-language-server "jdtls";
+          args = [ "--java-executable" (lib.getExe' pkgs.jdk21_headless "java") ];
+          extensionToLanguage.".java" = "java";
+        };
         python = {
           command = lib.getExe' pkgs.basedpyright "basedpyright-langserver";
           args = [ "--stdio" ];
