@@ -1,0 +1,61 @@
+package main
+
+import "testing"
+
+func TestIoctlConstants(t *testing.T) {
+	cases := []struct {
+		name string
+		got  uintptr
+		want uintptr
+	}{
+		{"EVIOCGRAB", eviocgrab, 0x40044590},
+		{"UI_SET_EVBIT", uiSetEvbit, 0x40045564},
+		{"UI_SET_KEYBIT", uiSetKeybit, 0x40045565},
+		{"UI_SET_RELBIT", uiSetRelbit, 0x40045566},
+		{"UI_DEV_CREATE", uiDevCreate, 0x5501},
+		{"UI_DEV_DESTROY", uiDevDestroy, 0x5502},
+		{"UI_DEV_SETUP", uiDevSetup, 0x405c5503},
+		{"EVIOCGNAME(256)", eviocgname(256), 0x81004506},
+		{"EVIOCGPROP(8)", eviocgprop(8), 0x80084509},
+		{"EVIOCGBIT(EV_KEY=1,96)", eviocgbit(evKey, 96), 0x80604521},
+		{"EVIOCGBIT(EV_REL=2,2)", eviocgbit(evRel, 2), 0x80024522},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s = 0x%x, want 0x%x", c.name, c.got, c.want)
+		}
+	}
+}
+
+func TestSizeofUinputSetup(t *testing.T) {
+	if sizeofUinputSetup != 92 {
+		t.Errorf("sizeofUinputSetup = %d, want 92", sizeofUinputSetup)
+	}
+}
+
+func TestTestBit(t *testing.T) {
+	mask := []byte{0b00000100, 0b00000001}
+	if !testBit(mask, 2) {
+		t.Error("expected bit 2 set")
+	}
+	if testBit(mask, 3) {
+		t.Error("expected bit 3 clear")
+	}
+	if !testBit(mask, 8) {
+		t.Error("expected bit 8 set")
+	}
+	if testBit(mask, 100) {
+		t.Error("expected out-of-range bit to read as clear, not panic")
+	}
+}
+
+func TestMakeEvent(t *testing.T) {
+	buf := makeEvent(evKey, btnLeft, 1)
+	if len(buf) != sizeofInputEvent {
+		t.Fatalf("len = %d, want %d", len(buf), sizeofInputEvent)
+	}
+	evType, code, value := decodeEvent(buf)
+	if evType != evKey || code != btnLeft || value != 1 {
+		t.Errorf("got (%d,%d,%d), want (%d,%d,1)", evType, code, value, evKey, btnLeft)
+	}
+}
