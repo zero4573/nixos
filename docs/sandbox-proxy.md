@@ -42,7 +42,7 @@ sequenceDiagram
         S->>K: recreate only these
     end
     S-->>L: ready
-    L->>S: sandbox-npmrc, sandbox-goproxy, sandbox-mcp-config ...
+    L->>S: sandbox-npmrc, sandbox-goproxy, sandbox-maven-settings, sandbox-mcp-config ...
     S-->>L: credential-free URLs
 ```
 
@@ -73,8 +73,15 @@ to still exist.
   worth the fragility. Caddy strips the npm path prefix before Verdaccio.
 - Docker registry v2 requests that miss the registry-cache pull-through mirror
   (404/5xx) fall through to Artifactory with credentials; `:7080` is the Go
-  proxy, adding basic auth to every request.
-- The Artifactory host and npm/go/docker paths are read back from the native
+  and Maven proxy, adding basic auth to every request.
+- Maven gets plain HTTP to `:7080` rather than the `tls internal` vhost: the
+  JVM trusts only its own `cacerts`, not the sandbox's CA bundle. With
+  `host-login --maven-repo`, sandboxes get a read-only `~/.m2/settings.xml`
+  (`sandbox-maven-settings`) mirroring every repository (`mirrorOf *`) to
+  `http://registry-proxy:7080/artifactory/<repo>/`, so Maven Central and any
+  repository a POM names resolve through Artifactory, and no credential is in
+  the sandbox.
+- The Artifactory host and npm/go/docker/maven paths are read back from the native
   config `host-login` wrote. Only `GOPROXY`'s first entry (ours) matters; later
   entries are the fallback chain `host-login` keeps.
 
@@ -101,7 +108,7 @@ encoded or unreadable bodies.
 ## Setup
 
 - Registries: `sandbox-proxy host-login <host> --npm-repo <repo> --go-repo <repo>
-  --docker-repo <repo>`, with a 1Password item titled like the Artifactory host
+  --docker-repo <repo> [--maven-repo <repo>]` (here `java-virtual`), with a 1Password item titled like the Artifactory host
   (username and password fields).
 - MCP servers: `sandbox-proxy mcp add <name> --url <url> --op-item <item>
   [--auth basic|bearer]` stores the server (no secrets) in

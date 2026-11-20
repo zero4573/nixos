@@ -338,6 +338,10 @@ if [[ "$proxy_registry" == 1 ]]; then
     registry_env_flags+=(-e "GOPROXY=$goproxy_url")
   fi
 
+  if sandbox-proxy sandbox-maven-settings > "$tmp_dir/maven-settings.xml" 2>/dev/null; then
+    mounts+=(-v "$tmp_dir/maven-settings.xml:$HOME/.m2/settings.xml:ro")
+  fi
+
   if docker_prefix="$(sandbox-proxy sandbox-docker-prefix 2>/dev/null)"; then
     registry_env_flags+=(-e "REGISTRY_MIRROR_PREFIX=$docker_prefix")
   fi
@@ -1065,8 +1069,9 @@ cacert_mounts=(
 )
 
 # podman's defaults: UTC without --tz=local; an overlay upperdir can't be on the container's
-# overlayfs root, so nested podman's storage is a volume; without --init the agent is PID 1,
-# so its tools' orphans go unreaped and servers watching their parent see PID 1 instead
+# overlayfs root, so nested podman's storage and its build temp dir (/var/tmp) are volumes;
+# without --init the agent is PID 1, so its tools' orphans go unreaped and servers watching
+# their parent see PID 1 instead
 systemd-run --user --scope --quiet --collect --slice=aisandbox.slice -- \
 podman run --rm "${tty_flags[@]}" \
   --init \
@@ -1079,6 +1084,7 @@ podman run --rm "${tty_flags[@]}" \
   --tz=local \
   -v /nix/store:/nix/store:ro \
   -v /var/lib/containers \
+  -v /var/tmp \
   -v "$project_root:$project_root:$project_mode" \
   "${dir_mounts[@]}" \
   -w "$PWD" \

@@ -17,7 +17,7 @@ MCP_HOST_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/sandbox-proxy/mcp-host.json"
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  sandbox-proxy host-login <host> --npm-repo <repo> --go-repo <repo> --docker-repo <repo>
+  sandbox-proxy host-login <host> --npm-repo <repo> --go-repo <repo> --docker-repo <repo> [--maven-repo <repo>]
   sandbox-proxy start [registry|mcp]   (default: every configured service;
                                         reuses proxies already running with
                                         the same config)
@@ -30,6 +30,7 @@ Usage:
   sandbox-proxy sandbox-npmrc
   sandbox-proxy sandbox-goproxy
   sandbox-proxy sandbox-docker-prefix
+  sandbox-proxy sandbox-maven-settings
   sandbox-proxy sandbox-extra-host
   sandbox-proxy mcp add <name> --url <url> --op-item <1password item> [--auth basic|bearer]
   sandbox-proxy mcp remove <name>
@@ -123,7 +124,7 @@ ensure_network() {
 }
 
 discover_config() {
-  ARTIFACTORY_HOST="" NPM_PATH="" GO_PATH="" DOCKER_REPO=""
+  ARTIFACTORY_HOST="" NPM_PATH="" GO_PATH="" DOCKER_REPO="" MAVEN_REPO=""
 
   if [ -f "$HOME/.npmrc" ]; then
     local reg_line reg_url no_scheme
@@ -162,6 +163,12 @@ discover_config() {
     if [ -n "$docker_repo_line" ]; then
       DOCKER_REPO="${docker_repo_line#export ARTIFACTORY_DOCKER_REPO=}"
     fi
+
+    local maven_repo_line
+    maven_repo_line="$(grep -m1 '^export ARTIFACTORY_MAVEN_REPO=' "$HOME/.custom" || true)"
+    if [ -n "$maven_repo_line" ]; then
+      MAVEN_REPO="${maven_repo_line#export ARTIFACTORY_MAVEN_REPO=}"
+    fi
   fi
 }
 
@@ -176,12 +183,13 @@ cmd_host_login() {
   host="$(normalize_host "$host")"
   shift
 
-  local npm_repo="" go_repo="" docker_repo=""
+  local npm_repo="" go_repo="" docker_repo="" maven_repo=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --npm-repo) npm_repo="$2"; shift 2 ;;
       --go-repo) go_repo="$2"; shift 2 ;;
       --docker-repo) docker_repo="$2"; shift 2 ;;
+      --maven-repo) maven_repo="$2"; shift 2 ;;
       *) echo "sandbox-proxy: unknown host-login option: $1" >&2; exit 1 ;;
     esac
   done
@@ -231,6 +239,17 @@ cmd_host_login() {
     echo "export GOPROXY=$goproxy_url" >> "$custom"
     chmod 600 "$custom"
     echo "sandbox-proxy: updated $custom (GOPROXY) for $host/$go_path"
+  fi
+
+  if [ -n "$maven_repo" ]; then
+    if ! [[ "$maven_repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      echo "sandbox-proxy: --maven-repo takes a repository key, not '$maven_repo'" >&2
+      exit 1
+    fi
+    grep -v '^export ARTIFACTORY_MAVEN_REPO=' "$HOME/.custom" > "$HOME/.custom.tmp" || true
+    mv "$HOME/.custom.tmp" "$HOME/.custom"
+    echo "export ARTIFACTORY_MAVEN_REPO=$maven_repo" >> "$HOME/.custom"
+    echo "sandbox-proxy: updated $HOME/.custom (ARTIFACTORY_MAVEN_REPO) for $host/$maven_repo"
   fi
 
   if [ -n "$docker_repo" ]; then
@@ -411,6 +430,25 @@ cmd_sandbox_goproxy() {
   echo "http://registry-proxy:7080$GO_PATH"
 }
 
+cmd_sandbox_maven_settings() {
+  discover_config
+  if [ -z "$MAVEN_REPO" ]; then
+    echo "sandbox-proxy: no maven repository configured (run host-login --maven-repo first)" >&2
+    exit 1
+  fi
+  cat <<SETTINGS
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+  <mirrors>
+    <mirror>
+      <id>sandbox-proxy</id>
+      <mirrorOf>*</mirrorOf>
+      <url>http://registry-proxy:7080/artifactory/$MAVEN_REPO/</url>
+    </mirror>
+  </mirrors>
+</settings>
+SETTINGS
+}
+
 cmd_sandbox_docker_prefix() {
   discover_config
   if [ -z "$ARTIFACTORY_HOST" ]; then
@@ -583,6 +621,7 @@ case "${1:-}" in
   sandbox-npmrc) cmd_sandbox_npmrc ;;
   sandbox-goproxy) cmd_sandbox_goproxy ;;
   sandbox-docker-prefix) cmd_sandbox_docker_prefix ;;
+  sandbox-maven-settings) cmd_sandbox_maven_settings ;;
   sandbox-extra-host) cmd_sandbox_extra_host ;;
   mcp) shift; cmd_mcp "$@" ;;
   mcp-configured) cmd_mcp_configured ;;

@@ -206,7 +206,10 @@ and `programs.claudeSandbox.extraPackages`. The slim Debian image has little
 beyond coreutils, grep and sed, and these come before its `/usr/bin`, shadowing
 its copies, so the image needs nothing preinstalled. The nested podman toolchain
 (also from the host's nixpkgs; conmon and crun are found on PATH at runtime)
-lets the session run containers of its own. `openssh` is there for `ssh-keygen`
+lets the session run containers of its own. Its storage (`/var/lib/containers`)
+and `podman build`'s temp dir (`/var/tmp`) are anonymous volumes, since an
+overlay upperdir can't sit on the container's own overlayfs root (the build
+fails with `overlay: ... userxattr`). `openssh` is there for `ssh-keygen`
 only (no sshd, no ssh config).
 
 Browser and media tools (`pw-node`, playwright, ffmpeg/ffprobe,

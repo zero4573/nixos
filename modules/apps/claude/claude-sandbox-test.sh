@@ -62,7 +62,14 @@ case "${STUB_NIX_TRUSTED:-0}" in
 esac
 STUB
 echo 'exit 0' | stub xdg-dbus-proxy
-echo 'exit 1' | stub sandbox-proxy
+stub sandbox-proxy <<'STUB'
+[[ -n "${STUB_PROXY:-}" ]] || exit 1
+case "$1" in
+  configured|start) exit 0 ;;
+  sandbox-maven-settings) echo '<settings/>' ;;
+  *) exit 1 ;;
+esac
+STUB
 echo 'exit 0' | stub git-update
 stub sqlite3 <<'STUB'
 printf '%s\n' "$*" >> "$STUB_OUT/sqlite3.calls"
@@ -142,6 +149,16 @@ mkdir -p "$home/ws/sub"
 SANDBOX_RO_PATHS="$home/ws" run_case parent --add-dir "$home/ws/sub"
 assert_mount parent "$home/ws:$home/ws:ro" "RO parent of an --add-dir is read-only"
 assert_mount parent "$home/ws/sub:$home/ws/sub:rw" "the --add-dir in it stays read-write"
+assert_mount parent "/var/tmp" "nested podman's build temp dir is a volume"
+if mounts parent | grep -q '/\.m2/settings\.xml:'; then fail "maven settings without a registry"; else ok "no maven settings without a registry"; fi
+
+new_home maven
+STUB_PROXY=1 run_case maven
+if mounts maven | grep -q ":$home/\.m2/settings\.xml:ro\$"; then
+  ok "the registry's maven settings are mounted read-only"
+else
+  fail "no maven settings mount in:"$'\n'"$(mounts maven)"
+fi
 
 new_home dups
 mkdir -p "$home/ws" "$home/cache" "$proj/.claude"
